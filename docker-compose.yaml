@@ -1,0 +1,74 @@
+version: '3.9'
+
+services:
+  # NATS JetStream Service
+  nats:
+    image: nats:2.10-alpine
+    container_name: aegis-nats
+    command: [
+      "-js",                          # Enable JetStream
+      "-sd", "/data",                 # Store directory
+      "-m", "8222",                   # HTTP monitoring port
+      "--name", "aegis-nats-server",  # Server name
+      "-DV"                           # Debug and verbose logging
+    ]
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP monitoring
+      - "6222:6222"   # Cluster connections (for future scaling)
+    volumes:
+      - nats-data:/data
+    environment:
+      - NATS_ENABLE_AUTH=false  # For development only
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - aegis-network
+    restart: unless-stopped
+
+  # IPC Router Service
+  ipc-router:
+    build:
+      context: .
+      dockerfile: packages/ipc_router/Dockerfile
+    container_name: aegis-ipc-router
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./packages/ipc_router:/app/ipc_router:ro
+      - ./packages/ipc_client_sdk:/app/ipc_client_sdk:ro
+    networks:
+      - aegis-network
+    restart: unless-stopped
+    command: ["python", "-m", "ipc_router"]
+
+  # Development tools container (optional)
+  dev-tools:
+    image: python:3.13-slim
+    container_name: aegis-dev-tools
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    networks:
+      - aegis-network
+    command: ["tail", "-f", "/dev/null"]  # Keep container running
+    profiles:
+      - dev  # Only start when explicitly requested
+
+networks:
+  aegis-network:
+    driver: bridge
+    name: aegis-network
+
+volumes:
+  nats-data:
+    name: aegis-nats-data
