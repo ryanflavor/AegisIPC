@@ -194,6 +194,11 @@ class CircuitBreaker:
         """Get current circuit breaker state."""
         return self._state
 
+    @property
+    def failure_count(self) -> int:
+        """Get current failure count."""
+        return self._failure_count
+
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to attempt reset."""
         if self._last_failure_time is None:
