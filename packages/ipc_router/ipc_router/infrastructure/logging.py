@@ -6,6 +6,7 @@ import sys
 from datetime import UTC
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -125,6 +126,7 @@ def setup_logging(config: LoggingConfig | None = None) -> None:
     root_logger.setLevel(config.level.value)
 
     # Create formatters
+    formatter: logging.Formatter
     if config.json_format:
         formatter = StructuredFormatter()
     else:
@@ -166,7 +168,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 # Example usage patterns
-def log_with_context(logger: logging.Logger, message: str, **context) -> None:
+def log_with_context(logger: logging.Logger, message: str, **context: Any) -> None:
     """
     Log a message with additional context.
 

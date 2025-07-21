@@ -13,15 +13,15 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field
 
-from ..domain.exceptions import (
+from ipc_router.domain.exceptions import (
     ApplicationError,
     InfrastructureError,
     ServiceUnavailableError,
 )
-from ..domain.exceptions import (
+from ipc_router.domain.exceptions import (
     TimeoutError as AegisTimeoutError,
 )
-from ..infrastructure.logging import get_logger
+from ipc_router.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -269,8 +269,8 @@ async def with_timeout(
     """
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
-    except TimeoutError:
-        raise AegisTimeoutError(operation_name, timeout)
+    except TimeoutError as e:
+        raise AegisTimeoutError(operation_name, timeout) from e
 
 
 class ErrorAggregator:
@@ -318,7 +318,7 @@ class ErrorAggregator:
         if not self._errors:
             return "No errors"
 
-        error_types = {}
+        error_types: dict[str, int] = {}
         for error in self._errors.values():
             error_type = type(error).__name__
             error_types[error_type] = error_types.get(error_type, 0) + 1
@@ -348,10 +348,11 @@ async def example_error_handling() -> None:
         async with breaker:
             # Call that might fail
             return await flaky_service_call()
+        return "Failed"  # Add default return for type checker
 
     # Example 3: Timeout wrapper
     try:
-        result = await with_timeout(
+        await with_timeout(
             protected_call(),
             timeout=5.0,
             operation_name="protected_call",
