@@ -12,6 +12,8 @@ dependencies = [
     "pydantic-settings==2.7.0",
     "asyncio==3.4.3",
     "uvloop==0.21.0",
+    "fastapi==0.115.6",
+    "ipc-client-sdk",
 ]
 
 [project.optional-dependencies]
@@ -20,11 +22,21 @@ dev = [
     "pytest-asyncio==0.25.0",
     "pytest-cov==6.0.0",
     "pytest-mock==3.14.0",
+    "httpx==0.28.1",
+    "ipc-client-sdk",
 ]
+
+[tool.uv.sources]
+ipc-client-sdk = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "ipc-client-sdk",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["ipc_router"]

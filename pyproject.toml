@@ -16,6 +16,10 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Distributed Computing",
 ]
+dependencies = [
+    "fastapi>=0.115.6",
+    "httpx>=0.28.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -61,6 +65,11 @@ members = [
     "packages/ipc_client_sdk",
     "packages/ipc_cli",
 ]
+
+[tool.uv.sources]
+ipc-router = { workspace = true }
+ipc-client-sdk = { workspace = true }
+ipc-cli = { workspace = true }
 
 [tool.black]
 line-length = 100

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
+
+from ..enums import ServiceStatus
 
 
 @dataclass
@@ -22,14 +24,14 @@ class ServiceInstance:
 
     instance_id: str
     service_name: str
-    status: str
-    registered_at: datetime = field(default_factory=datetime.utcnow)
-    last_heartbeat: datetime = field(default_factory=datetime.utcnow)
+    status: ServiceStatus
+    registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_heartbeat: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def update_heartbeat(self) -> None:
         """Update the last heartbeat timestamp to current time."""
-        self.last_heartbeat = datetime.utcnow()
+        self.last_heartbeat = datetime.now(UTC)
 
     def is_healthy(self, timeout_seconds: int = 30) -> bool:
         """Check if the instance is healthy based on heartbeat.
@@ -40,7 +42,7 @@ class ServiceInstance:
         Returns:
             True if instance is healthy, False otherwise
         """
-        time_since_heartbeat = (datetime.utcnow() - self.last_heartbeat).total_seconds()
+        time_since_heartbeat = (datetime.now(UTC) - self.last_heartbeat).total_seconds()
         return time_since_heartbeat <= timeout_seconds
 
 
@@ -57,7 +59,7 @@ class Service:
 
     name: str
     instances: dict[str, ServiceInstance] = field(default_factory=dict)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def add_instance(self, instance: ServiceInstance) -> None:
