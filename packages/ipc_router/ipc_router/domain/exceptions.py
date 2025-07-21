@@ -96,6 +96,51 @@ class ConflictError(DomainError):
         super().__init__(message, error_code="CONFLICT", details=details)
 
 
+class ServiceRegistrationError(DomainError):
+    """Raised when service registration fails."""
+
+    def __init__(self, service_name: str, instance_id: str, reason: str, **kwargs: Any) -> None:
+        """
+        Initialize service registration error.
+
+        Args:
+            service_name: Name of the service attempting to register
+            instance_id: Instance ID attempting to register
+            reason: Reason for registration failure
+            **kwargs: Additional error details
+        """
+        message = f"Failed to register service '{service_name}' instance '{instance_id}': {reason}"
+        details = {
+            "service_name": service_name,
+            "instance_id": instance_id,
+            "reason": reason,
+            **kwargs.pop("details", {}),
+        }
+        super().__init__(message, error_code="SERVICE_REGISTRATION_ERROR", details=details)
+
+
+class DuplicateServiceInstanceError(ConflictError):
+    """Raised when attempting to register a duplicate service instance."""
+
+    def __init__(self, service_name: str, instance_id: str, **kwargs: Any) -> None:
+        """
+        Initialize duplicate service instance error.
+
+        Args:
+            service_name: Name of the service
+            instance_id: Duplicate instance ID
+            **kwargs: Additional error details
+        """
+        message = (
+            f"Service instance '{instance_id}' is already registered for service '{service_name}'"
+        )
+        super().__init__(
+            message,
+            conflicting_resource=f"{service_name}/{instance_id}",
+            details={"service_name": service_name, "instance_id": instance_id},
+        )
+
+
 class ApplicationError(AegisIPCError):
     """Base class for application-layer errors."""
 

@@ -18,7 +18,7 @@ def test_basic_string_operations() -> None:
     assert len(test_string) == 8
 
 
-@pytest.mark.parametrize(  # type: ignore[misc]
+@pytest.mark.parametrize(
     "input_value,expected",
     [
         (1, 1),

@@ -91,7 +91,7 @@ class TestRetryDelay:
 class TestWithRetry:
     """Test retry decorator."""
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_successful_on_first_attempt(self) -> None:
         """Test function succeeds on first attempt."""
         mock_func = AsyncMock(return_value="success")
@@ -105,7 +105,7 @@ class TestWithRetry:
         assert result == "success"
         assert mock_func.call_count == 1
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_retry_on_failure(self) -> None:
         """Test function retries on failure."""
         mock_func = AsyncMock(side_effect=[ServiceUnavailableError("service", "down"), "success"])
@@ -119,7 +119,7 @@ class TestWithRetry:
         assert result == "success"
         assert mock_func.call_count == 2
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_max_attempts_exceeded(self) -> None:
         """Test function fails after max attempts."""
         mock_func = AsyncMock(side_effect=ServiceUnavailableError("service", "down"))
@@ -133,7 +133,7 @@ class TestWithRetry:
             await test_func()
         assert mock_func.call_count == 3
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_non_retryable_exception(self) -> None:
         """Test non-retryable exceptions are not retried."""
         mock_func = AsyncMock(side_effect=ValueError("bad value"))
@@ -151,7 +151,7 @@ class TestWithRetry:
 class TestWithTimeout:
     """Test timeout wrapper."""
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_successful_within_timeout(self) -> None:
         """Test function completes within timeout."""
 
@@ -162,7 +162,7 @@ class TestWithTimeout:
         result = await with_timeout(test_func(), timeout=1.0, operation_name="test")
         assert result == "success"
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_timeout_exceeded(self) -> None:
         """Test function times out."""
 
@@ -186,7 +186,7 @@ class TestCircuitBreaker:
         assert breaker.state == CircuitBreakerState.CLOSED
         assert breaker.failure_count == 0
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_successful_calls(self) -> None:
         """Test successful calls don't open circuit."""
         breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=10.0)
@@ -202,7 +202,7 @@ class TestCircuitBreaker:
         assert breaker.state == CircuitBreakerState.CLOSED
         assert breaker.failure_count == 0
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_circuit_opens_on_failures(self) -> None:
         """Test circuit opens after threshold failures."""
         breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=10.0)
@@ -217,7 +217,7 @@ class TestCircuitBreaker:
         assert breaker.state == CircuitBreakerState.OPEN
         assert breaker.failure_count == 3
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_open_circuit_rejects_calls(self) -> None:
         """Test open circuit rejects calls immediately."""
         breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
@@ -235,9 +235,9 @@ class TestCircuitBreaker:
                 # This should not be executed
                 raise AssertionError("Should not reach here")
 
-        assert "Circuit breaker is OPEN" in str(exc_info.value)  # type: ignore[unreachable]
+        assert "Circuit breaker is OPEN" in str(exc_info.value)
 
-    @pytest.mark.asyncio  # type: ignore[misc]
+    @pytest.mark.asyncio
     async def test_half_open_state(self) -> None:
         """Test circuit moves to half-open after recovery timeout."""
         breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=0.01)

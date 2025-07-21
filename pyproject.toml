@@ -149,6 +149,18 @@ show_column_numbers = true
 explicit_package_bases = true
 namespace_packages = true
 
+[[tool.mypy.overrides]]
+module = "*.tests.*"
+disallow_untyped_decorators = false
+warn_unused_ignores = false
+warn_unreachable = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_decorators = false
+warn_unused_ignores = false
+warn_unreachable = false
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["packages"]

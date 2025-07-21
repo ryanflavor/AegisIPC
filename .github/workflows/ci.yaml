@@ -9,7 +9,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.13"
-  UV_VERSION: "0.5.10"
+  UV_VERSION: "0.8.0"
 
 jobs:
   # Code Quality Checks
@@ -27,12 +27,13 @@ jobs:
 
       - name: Install uv
         run: |
-          curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
         run: |
           uv venv
+          source .venv/bin/activate
           uv sync --all-extras
 
       - name: Run Black
@@ -73,12 +74,13 @@ jobs:
 
       - name: Install uv
         run: |
-          curl -LsSf https://astral.sh/uv/${{ env.UV_VERSION }}/install.sh | sh
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
         run: |
           uv venv
+          source .venv/bin/activate
           uv sync --all-extras
 
       - name: Run pytest
@@ -113,24 +115,24 @@ jobs:
 
       - name: Start services
         run: |
-          docker-compose up -d
-          docker-compose ps
+          docker compose up -d
+          docker compose ps
 
       - name: Wait for services to be healthy
         run: |
-          timeout 60s bash -c 'until docker-compose ps | grep -q "healthy"; do sleep 1; done'
+          timeout 60s bash -c 'until docker compose ps | grep -q "healthy"; do sleep 1; done'
 
       - name: Run integration tests
         run: |
-          docker-compose exec -T ipc-router python -m pytest tests/ -v -m integration || true
+          docker compose exec -T ipc-router python -m pytest tests/ -v -m integration || true
 
       - name: Show service logs
         if: always()
-        run: docker-compose logs
+        run: docker compose logs
 
       - name: Stop services
         if: always()
-        run: docker-compose down -v
+        run: docker compose down -v
 
   # Build Docker Images
   docker:
