@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import msgpack
@@ -130,12 +130,15 @@ class NATSClient:
             # Serialize data with MessagePack
             payload = msgpack.packb(data, use_bin_type=True)
 
-            await self._nc.publish(
-                subject=subject,
-                payload=payload,
-                reply=reply,
-                headers=headers,
-            )
+            publish_kwargs = {
+                "subject": subject,
+                "payload": payload,
+                "headers": headers,
+            }
+            if reply is not None:
+                publish_kwargs["reply"] = reply
+
+            await self._nc.publish(**publish_kwargs)
 
             logger.debug(
                 "Published message",
@@ -226,7 +229,7 @@ class NATSClient:
     async def subscribe(
         self,
         subject: str,
-        callback: Callable[[Any, str | None], asyncio.Coroutine[Any, Any, None]],
+        callback: Callable[[Any, str | None], Coroutine[Any, Any, None]],
         queue: str | None = None,
     ) -> None:
         """Subscribe to a subject.

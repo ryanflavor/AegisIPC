@@ -103,7 +103,7 @@ class TestNATSClient:
 
             expected_data = msgpack.packb(data, use_bin_type=True)
             mock_nats_connection.publish.assert_called_once_with(
-                subject=subject, payload=expected_data, reply=None, headers=None
+                subject=subject, payload=expected_data, headers=None
             )
 
     @pytest.mark.asyncio

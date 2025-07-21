@@ -37,7 +37,7 @@ def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
         summary="List all registered services",
         description="Retrieve a list of all registered services and their instances",
     )
-    async def list_services() -> ServiceListResponse:  # type: ignore[misc]
+    async def list_services() -> ServiceListResponse:
         """List all registered services.
 
         Returns:
@@ -79,7 +79,7 @@ def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
             },
         },
     )
-    async def get_service(service_name: str) -> ServiceInfo:  # type: ignore[misc]
+    async def get_service(service_name: str) -> ServiceInfo:
         """Get information about a specific service.
 
         Args:
@@ -134,7 +134,7 @@ def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
         summary="Check system health",
         description="Get health status of all registered services",
     )
-    async def check_health() -> JSONResponse:  # type: ignore[misc]
+    async def check_health() -> JSONResponse:
         """Check the health of all services.
 
         Returns:

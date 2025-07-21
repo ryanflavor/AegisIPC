@@ -108,7 +108,8 @@ class NATSClient:
         try:
             request_data = msgpack.packb(payload, use_bin_type=True)
             response_msg = await self._nc.request(subject, request_data, timeout=timeout)
-            return msgpack.unpackb(response_msg.data, raw=False)
+            result = msgpack.unpackb(response_msg.data, raw=False)
+            return result if isinstance(result, dict) else {"data": result}
         except TimeoutError:
             return None
 

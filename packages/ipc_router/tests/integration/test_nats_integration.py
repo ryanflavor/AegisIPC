@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
 import msgpack
 import pytest
@@ -28,7 +29,7 @@ class TestNATSIntegration:
         # Test publish/subscribe
         received = []
 
-        async def handler(msg):
+        async def handler(msg: Any) -> None:
             received.append(msgpack.unpackb(msg.data))
 
         await nats_client.subscribe("test.subject", handler)
@@ -45,7 +46,7 @@ class TestNATSIntegration:
         """Test NATS request/response pattern."""
 
         # Set up responder
-        async def responder(msg):
+        async def responder(msg: Any) -> None:
             data = msgpack.unpackb(msg.data)
             response = {"echo": data["message"], "timestamp": datetime.now(UTC).isoformat()}
             await nats_client.publish(msg.reply, response)
@@ -240,7 +241,7 @@ class TestNATSIntegration:
         await handler.start()
 
         # Create multiple concurrent requests
-        async def register_service(index: int):
+        async def register_service(index: int) -> Any:
             request = ServiceRegistrationRequest(
                 service_name=f"concurrent-service-{index}",
                 instance_id=f"concurrent-instance-{index}",
@@ -275,8 +276,7 @@ class TestNATSIntegration:
 
         # Create request with large metadata
         large_metadata = {
-            f"key_{i}": f"value_{i}" * 100
-            for i in range(100)  # 600 bytes per entry  # 60KB total
+            f"key_{i}": f"value_{i}" * 100 for i in range(100)  # 600 bytes per entry  # 60KB total
         }
 
         request = ServiceRegistrationRequest(

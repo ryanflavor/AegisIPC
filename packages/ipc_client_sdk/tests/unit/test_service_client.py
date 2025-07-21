@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -272,7 +274,7 @@ class TestServiceClient:
         # Mock heartbeat
         heartbeat_called = False
 
-        async def mock_heartbeat(service_name):
+        async def mock_heartbeat(service_name: str) -> None:
             nonlocal heartbeat_called
             heartbeat_called = True
 
@@ -288,10 +290,8 @@ class TestServiceClient:
 
             # Cancel task
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
             assert heartbeat_called
 
@@ -622,7 +622,7 @@ class TestServiceClientAdvanced:
         client._heartbeat_tasks["test-service"] = mock_task
 
         # Mock asyncio.gather to simulate task completion
-        async def mock_gather(*args, **kwargs):
+        async def mock_gather(*args: Any, **kwargs: Any) -> list[Any]:
             return [None]
 
         with patch("asyncio.gather", side_effect=mock_gather) as mock_gather_patch:
@@ -711,7 +711,7 @@ class TestServiceClientAdvanced:
         # Mock heartbeat to track calls and then cancel
         heartbeat_calls = 0
 
-        async def mock_heartbeat(service_name):
+        async def mock_heartbeat(service_name: str) -> None:
             nonlocal heartbeat_calls
             heartbeat_calls += 1
             if heartbeat_calls >= 2:
@@ -721,10 +721,8 @@ class TestServiceClientAdvanced:
             task = await client.start_heartbeat("test-service", interval=0.01)
 
             # Wait for task to be cancelled
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
             assert heartbeat_calls >= 2
             assert task.cancelled() or task.done()
