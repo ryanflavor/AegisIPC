@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .routing_models import ServiceCallRequest, ServiceCallResponse
 from .service_models import (
     ServiceInfo,
     ServiceInstanceInfo,
@@ -11,6 +12,8 @@ from .service_models import (
 )
 
 __all__ = [
+    "ServiceCallRequest",
+    "ServiceCallResponse",
     "ServiceInfo",
     "ServiceInstanceInfo",
     "ServiceListResponse",

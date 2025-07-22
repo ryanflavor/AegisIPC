@@ -1,0 +1,157 @@
+version: '3.9'
+
+services:
+  # NATS JetStream Service for testing
+  nats-test:
+    image: nats:2.10-alpine
+    container_name: aegis-nats-test
+    command: [
+      "-js",                          # Enable JetStream
+      "-sd", "/data",                 # Store directory
+      "-m", "8222",                   # HTTP monitoring port
+      "--name", "aegis-nats-test",    # Server name
+      "-DV"                           # Debug and verbose logging
+    ]
+    ports:
+      - "4223:4222"   # Client connections (different port to avoid conflict)
+      - "8223:8222"   # HTTP monitoring
+    volumes:
+      - nats-test-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - aegis-test-network
+
+  # Multiple service instances for testing
+  test-service-1:
+    image: python:3.13-slim
+    container_name: aegis-test-service-1
+    environment:
+      - INSTANCE_ID=test-service-1
+      - SERVICE_NAME=multi-instance-service
+      - NATS_URL=nats://nats-test:4222
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      nats-test:
+        condition: service_healthy
+    networks:
+      - aegis-test-network
+    volumes:
+      - ../../../..:/app:ro
+    working_dir: /app
+    command: >
+      sh -c "cd /app && pip install -e packages/ipc_client_sdk packages/ipc_router &&
+      python -c '
+      import asyncio
+      from ipc_client_sdk import IPCClient
+      import os
+
+      async def run_service():
+          instance_id = os.environ[\"INSTANCE_ID\"]
+          service_name = os.environ[\"SERVICE_NAME\"]
+
+          async with IPCClient() as client:
+              # Register service
+              await client.register_service(service_name, instance_id, {\"node\": 1})
+              print(f\"{instance_id} registered\")
+
+              # Keep sending heartbeats
+              while True:
+                  await asyncio.sleep(5)
+                  await client.send_heartbeat(service_name, instance_id)
+
+      asyncio.run(run_service())
+      '"
+
+  test-service-2:
+    image: python:3.13-slim
+    container_name: aegis-test-service-2
+    environment:
+      - INSTANCE_ID=test-service-2
+      - SERVICE_NAME=multi-instance-service
+      - NATS_URL=nats://nats-test:4222
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      nats-test:
+        condition: service_healthy
+    networks:
+      - aegis-test-network
+    volumes:
+      - ../../../..:/app:ro
+    working_dir: /app
+    command: >
+      sh -c "cd /app && pip install -e packages/ipc_client_sdk packages/ipc_router &&
+      python -c '
+      import asyncio
+      from ipc_client_sdk import IPCClient
+      import os
+
+      async def run_service():
+          instance_id = os.environ[\"INSTANCE_ID\"]
+          service_name = os.environ[\"SERVICE_NAME\"]
+
+          async with IPCClient() as client:
+              # Register service
+              await client.register_service(service_name, instance_id, {\"node\": 2})
+              print(f\"{instance_id} registered\")
+
+              # Keep sending heartbeats
+              while True:
+                  await asyncio.sleep(5)
+                  await client.send_heartbeat(service_name, instance_id)
+
+      asyncio.run(run_service())
+      '"
+
+  test-service-3:
+    image: python:3.13-slim
+    container_name: aegis-test-service-3
+    environment:
+      - INSTANCE_ID=test-service-3
+      - SERVICE_NAME=multi-instance-service
+      - NATS_URL=nats://nats-test:4222
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      nats-test:
+        condition: service_healthy
+    networks:
+      - aegis-test-network
+    volumes:
+      - ../../../..:/app:ro
+    working_dir: /app
+    command: >
+      sh -c "cd /app && pip install -e packages/ipc_client_sdk packages/ipc_router &&
+      python -c '
+      import asyncio
+      from ipc_client_sdk import IPCClient
+      import os
+
+      async def run_service():
+          instance_id = os.environ[\"INSTANCE_ID\"]
+          service_name = os.environ[\"SERVICE_NAME\"]
+
+          async with IPCClient() as client:
+              # Register service
+              await client.register_service(service_name, instance_id, {\"node\": 3})
+              print(f\"{instance_id} registered\")
+
+              # Keep sending heartbeats
+              while True:
+                  await asyncio.sleep(5)
+                  await client.send_heartbeat(service_name, instance_id)
+
+      asyncio.run(run_service())
+      '"
+
+networks:
+  aegis-test-network:
+    driver: bridge
+    name: aegis-test-network
+
+volumes:
+  nats-test-data:
+    name: aegis-nats-test-data

@@ -12,7 +12,9 @@ import msgpack
 import nats
 from nats.aio.client import Client as NATSConnection
 
-from ipc_client_sdk.models import ServiceRegistrationResponse
+from ipc_client_sdk.models import (
+    ServiceRegistrationResponse,
+)
 
 
 @dataclass
@@ -323,3 +325,74 @@ class ServiceClient:
         task = asyncio.create_task(heartbeat_loop())
         self._heartbeat_tasks[service_name] = task
         return task
+
+    async def call(
+        self,
+        service_name: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        trace_id: str | None = None,
+    ) -> Any:
+        """Call a method on a service via the router.
+
+        Args:
+            service_name: Name of the target service
+            method: Method to call on the service
+            params: Method parameters (optional)
+            timeout: Request timeout in seconds (uses default if not provided)
+            trace_id: Optional trace ID for distributed tracing
+
+        Returns:
+            The result from the method call
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+            Exception: If the service call fails
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Generate trace ID if not provided
+        if trace_id is None:
+            trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+        # Build request data
+        request_data = {
+            "service_name": service_name,
+            "method": method,
+            "params": params or {},
+            "timeout": timeout or self._timeout,
+            "trace_id": trace_id,
+        }
+
+        # Send request to router
+        response = await self._nats_client.request(
+            "ipc.route.request",
+            request_data,
+            timeout=timeout or self._timeout,
+        )
+
+        if response is None:
+            raise TimeoutError(f"Service call to '{service_name}.{method}' timed out")
+
+        # Check if routing was successful
+        if not response.get("success", False):
+            error = response.get("error", {})
+            error_type = error.get("type", "UnknownError")
+            error_msg = error.get("message", f"Call to '{service_name}.{method}' failed")
+            error_code = error.get("code", 500)
+
+            # Create appropriate exception based on error code
+            if error_code == 404:
+                raise ValueError(f"Service '{service_name}' not found")
+            elif error_code == 503:
+                raise RuntimeError(f"Service '{service_name}' unavailable: {error_msg}")
+            elif error_code == 504:
+                raise TimeoutError(f"Service '{service_name}' timeout: {error_msg}")
+            else:
+                raise Exception(f"{error_type}: {error_msg}")
+
+        # Return the result
+        return response.get("result")

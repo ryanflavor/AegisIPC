@@ -12,8 +12,8 @@ import nats
 from nats.aio.client import Client as NATSConnection
 from nats.aio.msg import Msg
 
-from ...domain.exceptions import ConnectionError as IPCConnectionError
-from ..logging import get_logger
+from ipc_router.domain.exceptions import ConnectionError as IPCConnectionError
+from ipc_router.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -288,6 +288,28 @@ class NATSClient:
                 "queue": queue,
             },
         )
+
+    async def unsubscribe(self, subject: str) -> None:
+        """Unsubscribe from a subject.
+
+        Args:
+            subject: Subject to unsubscribe from
+        """
+        if subject in self._subscriptions:
+            task = self._subscriptions[subject]
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            del self._subscriptions[subject]
+            logger.info(
+                "Unsubscribed from subject",
+                extra={"subject": subject},
+            )
+        else:
+            logger.warning(
+                "Attempted to unsubscribe from unknown subject",
+                extra={"subject": subject},
+            )
 
     async def _subscription_handler(self, subscription: Any) -> None:
         """Handle subscription lifecycle."""

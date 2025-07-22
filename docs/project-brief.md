@@ -68,15 +68,3 @@ MVP的范围将通过三个核心史诗（Epics）来交付：
 ## **9\. 风险 (Risks)**
 
 * **主要风险**: “精确一次投递”和“无缝高可用切换”的技术实现复杂性较高，需要在集成测试中进行充分验证。
-
-
-
-
-###
-/BMad:agents:sm *draft-next-story, ultralthink
-
-/BMad:agents:po *validate-next-story '/home/ryan/workspace/github/AegisIPC/docs/stories/1.2.story.md'，ultralthink
-
-/BMad:agents:dev is running… *develop-story '/home/ryan/workspace/github/AegisIPC/docs/stories/1.1.story.md'，ultralthink,be careful and make the repo productive level.
-
-/BMad:agents:qa *review '/home/ryan/workspace/github/AegisIPC/docs/stories/1.1.story.md',ultralthink

@@ -1,0 +1,61 @@
+"""Domain events for service registry changes."""
+
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any
+
+from .enums import ServiceStatus
+
+
+class ServiceEventType(Enum):
+    """Types of service registry events."""
+
+    INSTANCE_REGISTERED = "instance_registered"
+    INSTANCE_UNREGISTERED = "instance_unregistered"
+    INSTANCE_STATUS_CHANGED = "instance_status_changed"
+    INSTANCE_HEARTBEAT_UPDATED = "instance_heartbeat_updated"
+
+
+@dataclass
+class ServiceEvent:
+    """Base class for service registry events."""
+
+    event_type: ServiceEventType
+    service_name: str
+    instance_id: str
+    timestamp: datetime
+    metadata: dict[str, Any] | None = None
+
+
+class InstanceStatusChangedEvent(ServiceEvent):
+    """Event fired when instance status changes."""
+
+    old_status: ServiceStatus
+    new_status: ServiceStatus
+
+    def __init__(
+        self,
+        service_name: str,
+        instance_id: str,
+        timestamp: datetime,
+        old_status: ServiceStatus,
+        new_status: ServiceStatus,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize instance status changed event."""
+        super().__init__(
+            event_type=ServiceEventType.INSTANCE_STATUS_CHANGED,
+            service_name=service_name,
+            instance_id=instance_id,
+            timestamp=timestamp,
+            metadata=metadata,
+        )
+        self.old_status = old_status
+        self.new_status = new_status
+
+
+ServiceEventHandler = Callable[[ServiceEvent], Awaitable[None]]

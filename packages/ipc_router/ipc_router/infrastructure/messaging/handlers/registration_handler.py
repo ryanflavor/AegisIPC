@@ -6,11 +6,11 @@ from typing import Any
 
 from ipc_client_sdk.models import ServiceRegistrationRequest
 
-from ....application.error_handling import RetryConfig
-from ....application.services import ServiceRegistry
-from ....domain.exceptions import AegisIPCError, DuplicateServiceInstanceError
-from ...logging import get_logger
-from ..nats_client import NATSClient
+from ipc_router.application.error_handling import RetryConfig
+from ipc_router.application.services import ServiceRegistry
+from ipc_router.domain.exceptions import AegisIPCError, DuplicateServiceInstanceError
+from ipc_router.infrastructure.logging import get_logger
+from ipc_router.infrastructure.messaging.nats_client import NATSClient
 
 logger = get_logger(__name__)
 
@@ -50,6 +50,11 @@ class RegistrationHandler:
             "Registration handler started",
             extra={"subject": self.REGISTRATION_SUBJECT},
         )
+
+    async def stop(self) -> None:
+        """Stop listening for registration requests."""
+        await self._nats_client.unsubscribe(self.REGISTRATION_SUBJECT)
+        logger.info("Registration handler stopped")
 
     async def _handle_registration(self, data: Any, reply_subject: str | None) -> None:
         """Handle incoming registration requests.
