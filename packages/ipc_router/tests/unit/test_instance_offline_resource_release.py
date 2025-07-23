@@ -322,7 +322,7 @@ class TestInstanceOfflineResourceRelease:
             """Simulate instance going offline."""
             await service_registry.unregister_instance("test-service", "concurrent-instance")
             count = await resource_registry.release_all_instance_resources("concurrent-instance")
-            return count
+            return int(count)
 
         async def try_register_new() -> list[str]:
             """Try to register new resources during release."""
@@ -458,7 +458,7 @@ class TestInstanceOfflineResourceRelease:
             await asyncio.sleep(0.01)  # Small delay
             await service_registry.unregister_instance("test-service", "transfer-instance-1")
             count = await resource_registry.release_all_instance_resources("transfer-instance-1")
-            return count
+            return int(count)
 
         # Run concurrently
         transfer_task = asyncio.create_task(transfer_resources())

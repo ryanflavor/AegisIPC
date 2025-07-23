@@ -220,6 +220,10 @@ class TestServiceDiscoveryIntegration:
 
         # Subscribe to status change events
         async def event_handler(event: object) -> None:
+            # Type assertion for mypy
+            from ipc_router.domain.events import InstanceStatusChangedEvent
+
+            assert isinstance(event, InstanceStatusChangedEvent)
             events_received.append(
                 {
                     "service": event.service_name,
@@ -294,7 +298,7 @@ class TestServiceDiscoveryIntegration:
             num_services = 10
             num_instances_per_service = 5
 
-            async def register_instance(service_idx: int, instance_idx: int) -> None:
+            async def register_instance(service_idx: int, instance_idx: int) -> bool:
                 request = ServiceRegistrationRequest(
                     service_name=f"{service_base}-{service_idx}",
                     instance_id=f"inst-{service_idx}-{instance_idx}",
@@ -307,7 +311,7 @@ class TestServiceDiscoveryIntegration:
                     timeout=5.0,
                 )
 
-                return response["envelope"]["success"]
+                return bool(response["envelope"]["success"])
 
             # Register all instances concurrently
             tasks = []
@@ -324,7 +328,7 @@ class TestServiceDiscoveryIntegration:
                 assert len(service_info.instances) == num_instances_per_service
 
             # Send concurrent heartbeats
-            async def send_heartbeat(service_idx: int, instance_idx: int) -> None:
+            async def send_heartbeat(service_idx: int, instance_idx: int) -> bool:
                 heartbeat_data = {
                     "service_name": f"{service_base}-{service_idx}",
                     "instance_id": f"inst-{service_idx}-{instance_idx}",
@@ -336,7 +340,7 @@ class TestServiceDiscoveryIntegration:
                     timeout=5.0,
                 )
 
-                return response["envelope"]["success"]
+                return bool(response["envelope"]["success"])
 
             # Send heartbeats for all instances
             heartbeat_tasks = []

@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from statistics import mean, median, stdev
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -53,10 +55,10 @@ async def large_scale_setup() -> dict[str, object]:
     }
 
 
-def measure_operation_time(func):
+def measure_operation_time(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator to measure async operation time."""
 
-    async def wrapper(*args, **kwargs) -> tuple:
+    async def wrapper(*args: Any, **kwargs: Any) -> tuple[Any, float]:
         start_time = time.perf_counter()
         result = await func(*args, **kwargs)
         end_time = time.perf_counter()
@@ -68,7 +70,9 @@ def measure_operation_time(func):
 class TestResourceRoutingPerformance:
     """Performance tests for resource routing operations."""
 
-    async def test_resource_registration_performance(self, large_scale_setup) -> None:
+    async def test_resource_registration_performance(
+        self, large_scale_setup: dict[str, Any]
+    ) -> None:
         """Test resource registration performance."""
         resource_service = large_scale_setup["resource_service"]
         instances = large_scale_setup["instances"]
@@ -88,7 +92,7 @@ class TestResourceRoutingPerformance:
         registration_times = []
 
         @measure_operation_time
-        async def register_single_resource(instance_id: str, resource_id: str):
+        async def register_single_resource(instance_id: str, resource_id: str) -> Any:
             return await resource_service.register_resource(
                 service_name="perf-service",
                 instance_id=instance_id,
@@ -122,7 +126,7 @@ class TestResourceRoutingPerformance:
             },
         )
 
-    async def test_resource_lookup_performance(self, large_scale_setup) -> None:
+    async def test_resource_lookup_performance(self, large_scale_setup: dict[str, Any]) -> None:
         """Test resource lookup performance with O(1) complexity."""
         resource_service = large_scale_setup["resource_service"]
         resource_registry = large_scale_setup["resource_registry"]
@@ -156,7 +160,7 @@ class TestResourceRoutingPerformance:
         lookup_times = []
 
         @measure_operation_time
-        async def lookup_resource(resource_id: str):
+        async def lookup_resource(resource_id: str) -> Any:
             return await resource_registry.get_resource_owner(resource_id)
 
         # Perform 1000 random lookups
@@ -188,7 +192,7 @@ class TestResourceRoutingPerformance:
             },
         )
 
-    async def test_resource_routing_performance(self, large_scale_setup) -> None:
+    async def test_resource_routing_performance(self, large_scale_setup: dict[str, Any]) -> None:
         """Test end-to-end routing performance with resources."""
         routing_service = large_scale_setup["routing_service"]
         resource_service = large_scale_setup["resource_service"]
@@ -221,7 +225,7 @@ class TestResourceRoutingPerformance:
         routing_times = []
 
         @measure_operation_time
-        async def route_request(resource_id: str):
+        async def route_request(resource_id: str) -> Any:
             request = RouteRequest(
                 service_name="perf-service",
                 resource_id=resource_id,
@@ -257,7 +261,7 @@ class TestResourceRoutingPerformance:
             },
         )
 
-    async def test_bulk_registration_performance(self, large_scale_setup) -> None:
+    async def test_bulk_registration_performance(self, large_scale_setup: dict[str, Any]) -> None:
         """Test bulk resource registration performance."""
         resource_service = large_scale_setup["resource_service"]
 
@@ -335,7 +339,9 @@ class TestResourceRoutingPerformance:
             },
         )
 
-    async def test_concurrent_operations_performance(self, large_scale_setup) -> None:
+    async def test_concurrent_operations_performance(
+        self, large_scale_setup: dict[str, Any]
+    ) -> None:
         """Test performance under high concurrency."""
         resource_service = large_scale_setup["resource_service"]
         routing_service = large_scale_setup["routing_service"]
@@ -423,7 +429,9 @@ class TestResourceRoutingPerformance:
         )
 
     @pytest.mark.parametrize("num_resources", [100, 1000, 10000])
-    async def test_scalability_with_resource_count(self, large_scale_setup, num_resources) -> None:
+    async def test_scalability_with_resource_count(
+        self, large_scale_setup: dict[str, Any], num_resources: int
+    ) -> None:
         """Test system scalability with increasing resource counts."""
         resource_service = large_scale_setup["resource_service"]
         resource_registry = large_scale_setup["resource_registry"]

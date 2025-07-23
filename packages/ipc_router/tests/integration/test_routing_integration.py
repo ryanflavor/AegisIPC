@@ -271,6 +271,9 @@ class TestRoutingIntegration:
         # Should have received status change event
         assert len(events_received) == 1
         event = events_received[0]
+        from ipc_router.domain.events import InstanceStatusChangedEvent
+
+        assert isinstance(event, InstanceStatusChangedEvent)
         assert event.service_name == service_name
         assert event.instance_id == instance_id
         assert event.old_status == ServiceStatus.ONLINE

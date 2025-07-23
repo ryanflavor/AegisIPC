@@ -427,7 +427,7 @@ class TestRouteHandlerIntegration:
                 await nats_client.subscribe(f"ipc.instance.instance-{i}.inbox", handler)
 
             # Send many concurrent requests
-            async def send_request(request_id: int) -> None:
+            async def send_request(request_id: int) -> RouteResponse:
                 route_request = RouteRequest(
                     service_name=service_name,
                     method="concurrent_test",
@@ -449,7 +449,7 @@ class TestRouteHandlerIntegration:
             responses = await asyncio.gather(*tasks)
 
             # All should succeed
-            assert all(r.success for r in responses)
+            assert all(r is not None and r.success for r in responses)
 
             # Verify even distribution (10 requests per instance)
             for count in instance_counts.values():

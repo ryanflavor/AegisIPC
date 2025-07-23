@@ -969,7 +969,7 @@ class TestResourceServiceComplete:
         # Setup event handler to track events
         events_received = []
 
-        async def event_handler(event):
+        async def event_handler(event: object) -> None:
             events_received.append(event)
 
         resource_service.subscribe_to_resource_events("*", event_handler)

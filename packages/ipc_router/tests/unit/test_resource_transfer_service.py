@@ -573,7 +573,7 @@ class TestResourceTransferService:
         mock_resource_registry.release_resource.return_value = True
 
         # Simulate delay in resource operations
-        async def delayed_release(*args):
+        async def delayed_release(*args: object) -> bool:
             await asyncio.sleep(0.1)
             return True
 
