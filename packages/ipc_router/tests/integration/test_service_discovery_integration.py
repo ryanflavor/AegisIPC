@@ -219,7 +219,7 @@ class TestServiceDiscoveryIntegration:
         events_received = []
 
         # Subscribe to status change events
-        async def event_handler(event):
+        async def event_handler(event: object) -> None:
             events_received.append(
                 {
                     "service": event.service_name,
@@ -294,7 +294,7 @@ class TestServiceDiscoveryIntegration:
             num_services = 10
             num_instances_per_service = 5
 
-            async def register_instance(service_idx: int, instance_idx: int):
+            async def register_instance(service_idx: int, instance_idx: int) -> None:
                 request = ServiceRegistrationRequest(
                     service_name=f"{service_base}-{service_idx}",
                     instance_id=f"inst-{service_idx}-{instance_idx}",
@@ -324,7 +324,7 @@ class TestServiceDiscoveryIntegration:
                 assert len(service_info.instances) == num_instances_per_service
 
             # Send concurrent heartbeats
-            async def send_heartbeat(service_idx: int, instance_idx: int):
+            async def send_heartbeat(service_idx: int, instance_idx: int) -> None:
                 heartbeat_data = {
                     "service_name": f"{service_base}-{service_idx}",
                     "instance_id": f"inst-{service_idx}-{instance_idx}",

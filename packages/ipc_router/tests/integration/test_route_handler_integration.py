@@ -150,10 +150,10 @@ class TestRouteHandlerIntegration:
                 )
 
                 # Create handler for this instance
-                instance_calls = []
+                instance_calls: list[Any] = []
                 instance_handlers[instance_id] = instance_calls
 
-                async def create_handler(inst_id: str, calls_list: list):
+                async def create_handler(inst_id: str, calls_list: list[Any]) -> Any:
                     async def handler(data: Any, reply_subject: str | None) -> None:
                         calls_list.append(data)
                         response = {"instance": inst_id, "processed": True}
@@ -327,10 +327,10 @@ class TestRouteHandlerIntegration:
                 )
 
             # Set up handlers for both instances
-            instance1_calls = []
-            instance2_calls = []
+            instance1_calls: list[Any] = []
+            instance2_calls: list[Any] = []
 
-            async def create_handler(inst_id: str, calls_list: list):
+            async def create_handler(inst_id: str, calls_list: list[Any]) -> Any:
                 async def handler(data: Any, reply_subject: str | None) -> None:
                     calls_list.append(data)
                     response = {"from": inst_id}
@@ -411,7 +411,7 @@ class TestRouteHandlerIntegration:
             # Set up handlers with delay to simulate processing
             instance_counts = {f"instance-{i}": 0 for i in range(1, num_instances + 1)}
 
-            async def create_handler(inst_id: str):
+            async def create_handler(inst_id: str) -> Any:
                 async def handler(data: Any, reply_subject: str | None) -> None:
                     instance_counts[inst_id] += 1
                     # Simulate some processing time
@@ -427,7 +427,7 @@ class TestRouteHandlerIntegration:
                 await nats_client.subscribe(f"ipc.instance.instance-{i}.inbox", handler)
 
             # Send many concurrent requests
-            async def send_request(request_id: int):
+            async def send_request(request_id: int) -> None:
                 route_request = RouteRequest(
                     service_name=service_name,
                     method="concurrent_test",
@@ -565,7 +565,7 @@ class TestRouteHandlerIntegration:
                 )
 
             # Set up handlers
-            async def create_handler(inst_id: str):
+            async def create_handler(inst_id: str) -> Any:
                 async def handler(data: Any, reply_subject: str | None) -> None:
                     response = {"from": inst_id, "healthy": True}
                     if reply_subject:
@@ -581,7 +581,7 @@ class TestRouteHandlerIntegration:
             await registry.update_heartbeat(service_name, "instance-1")
 
             # Keep sending heartbeats for instance-1 during the test
-            async def send_heartbeats():
+            async def send_heartbeats() -> None:
                 for _ in range(10):
                     await asyncio.sleep(0.4)  # Less than 500ms timeout
                     await registry.update_heartbeat(service_name, "instance-1")

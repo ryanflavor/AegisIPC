@@ -7,5 +7,6 @@ for various domain services and strategies.
 from __future__ import annotations
 
 from .load_balancer import LoadBalancer
+from .resource_manager import ResourceManager
 
-__all__ = ["LoadBalancer"]
+__all__ = ["LoadBalancer", "ResourceManager"]

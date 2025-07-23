@@ -101,7 +101,8 @@ def with_retry(config: RetryConfig | None = None) -> Callable[[AsyncFunc], Async
                     last_exception = e
                     if attempt == config.max_attempts:
                         logger.error(
-                            f"Max retry attempts ({config.max_attempts}) reached for {func.__name__}",
+                            f"Max retry attempts ({config.max_attempts}) reached "
+                            f"for {func.__name__}",
                             extra={
                                 "function": func.__name__,
                                 "attempt": attempt,

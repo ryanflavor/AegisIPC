@@ -18,6 +18,7 @@ class ServiceEventType(Enum):
     INSTANCE_UNREGISTERED = "instance_unregistered"
     INSTANCE_STATUS_CHANGED = "instance_status_changed"
     INSTANCE_HEARTBEAT_UPDATED = "instance_heartbeat_updated"
+    CUSTOM = "custom"
 
 
 @dataclass

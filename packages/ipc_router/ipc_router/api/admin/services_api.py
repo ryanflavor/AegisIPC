@@ -6,9 +6,9 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 from ipc_client_sdk.models import ServiceInfo, ServiceListResponse
 
-from ...application.services import ServiceRegistry
-from ...domain.exceptions import NotFoundError
-from ...infrastructure.logging import get_logger
+from ipc_router.application.services import ServiceRegistry
+from ipc_router.domain.exceptions import NotFoundError
+from ipc_router.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 

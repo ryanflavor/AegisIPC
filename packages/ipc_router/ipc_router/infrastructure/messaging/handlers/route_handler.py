@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ipc_router.application.error_handling import RetryConfig, with_retry
 from ipc_router.application.models.routing_models import RouteRequest, RouteResponse
 from ipc_router.domain.exceptions import ServiceUnavailableError
 from ipc_router.infrastructure.logging import get_logger
+
+F = TypeVar("F", bound=Callable[..., Any])
 
 if TYPE_CHECKING:
     from ipc_router.application.services.routing_service import RoutingService
@@ -125,7 +128,7 @@ class RouteRequestHandler:
                     "message": str(e),
                     "code": 500,
                 },
-                trace_id=data.get("trace_id", "unknown") if "data" in locals() else "unknown",
+                trace_id=data.get("trace_id", "unknown") if isinstance(data, dict) else "unknown",
                 duration_ms=(time.time() - start_time) * 1000,
             )
 
@@ -174,7 +177,6 @@ class RouteRequestHandler:
             forward_start = time.time()
 
             # Use retry mechanism for forwarding
-            @with_retry(self._retry_config)
             async def send_and_wait() -> Any:
                 # Create future for response tracking
                 response_future: asyncio.Future[Any] = asyncio.Future()
@@ -227,7 +229,10 @@ class RouteRequestHandler:
                     except TimeoutError as e:
                         raise ServiceUnavailableError(
                             service_name=request.service_name,
-                            reason=f"Instance {instance_id} did not respond within {request.timeout}s",
+                            reason=(
+                                f"Instance {instance_id} did not respond "
+                                f"within {request.timeout}s"
+                            ),
                         ) from e
 
                     finally:
@@ -240,7 +245,9 @@ class RouteRequestHandler:
                     self._active_requests.pop(correlation_id, None)
                     raise
 
-            await send_and_wait()
+            # Apply retry wrapper
+            retry_wrapper = with_retry(self._retry_config)
+            await retry_wrapper(send_and_wait)()
 
         except Exception as e:
             logger.error(

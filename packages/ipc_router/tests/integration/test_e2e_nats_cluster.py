@@ -10,7 +10,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 
 import pytest
-from ipc_client_sdk import IPCClient
+from ipc_client_sdk import ServiceClient as IPCClient
 from ipc_router.application.services import HealthChecker, RoutingService, ServiceRegistry
 from ipc_router.infrastructure.messaging import NATSClient
 from ipc_router.infrastructure.messaging.handlers import RegistrationHandler

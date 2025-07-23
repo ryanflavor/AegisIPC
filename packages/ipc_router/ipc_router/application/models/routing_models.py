@@ -15,6 +15,7 @@ class RouteRequest(BaseModel):
     """
 
     service_name: str = Field(..., description="Target service name")
+    resource_id: str | None = Field(default=None, description="Resource ID for precise routing")
     method: str = Field(..., description="Method to call on the service")
     params: dict[str, Any] = Field(default_factory=dict, description="Method parameters")
     timeout: float = Field(default=5.0, gt=0, le=300, description="Request timeout in seconds")
@@ -40,6 +41,7 @@ class RouteRequest(BaseModel):
         "json_schema_extra": {
             "example": {
                 "service_name": "user-service",
+                "resource_id": "user-123",
                 "method": "get_user",
                 "params": {"user_id": "123"},
                 "timeout": 5.0,

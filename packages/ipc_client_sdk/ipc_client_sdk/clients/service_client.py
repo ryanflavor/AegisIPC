@@ -13,6 +13,11 @@ import nats
 from nats.aio.client import Client as NATSConnection
 
 from ipc_client_sdk.models import (
+    ResourceMetadata,
+    ResourceRegistrationRequest,
+    ResourceRegistrationResponse,
+    ResourceReleaseRequest,
+    ResourceReleaseResponse,
     ServiceRegistrationResponse,
 )
 
@@ -54,6 +59,41 @@ class ServiceRegistrationError(Exception):
         super().__init__(message)
         self.error_code = error_code
         self.details = details or {}
+
+
+class ResourceConflictError(Exception):
+    """Raised when resource registration conflicts occur."""
+
+    def __init__(
+        self,
+        message: str,
+        conflicts: dict[str, str] | None = None,
+        registered: list[str] | None = None,
+    ) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Error message
+            conflicts: Dictionary of conflicting resource IDs and their owners
+            registered: List of successfully registered resource IDs
+        """
+        super().__init__(message)
+        self.conflicts = conflicts or {}
+        self.registered = registered or []
+
+
+class ResourceNotFoundError(Exception):
+    """Raised when requested resource is not found."""
+
+    def __init__(self, message: str, resource_id: str | None = None) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Error message
+            resource_id: The resource ID that was not found
+        """
+        super().__init__(message)
+        self.resource_id = resource_id
 
 
 class NATSClient:
@@ -155,6 +195,7 @@ class ServiceClient:
         self._nats_client = NATSClient(nats_url)
         self._registered_services: set[str] = set()
         self._heartbeat_tasks: dict[str, asyncio.Task[None]] = {}
+        self._registered_resources: dict[str, set[str]] = {}  # service_name -> resource_ids
 
     @property
     def is_connected(self) -> bool:
@@ -333,6 +374,7 @@ class ServiceClient:
         params: dict[str, Any] | None = None,
         timeout: float | None = None,
         trace_id: str | None = None,
+        resource_id: str | None = None,
     ) -> Any:
         """Call a method on a service via the router.
 
@@ -342,6 +384,7 @@ class ServiceClient:
             params: Method parameters (optional)
             timeout: Request timeout in seconds (uses default if not provided)
             trace_id: Optional trace ID for distributed tracing
+            resource_id: Optional resource ID for resource-aware routing
 
         Returns:
             The result from the method call
@@ -367,6 +410,10 @@ class ServiceClient:
             "trace_id": trace_id,
         }
 
+        # Add resource_id if provided
+        if resource_id is not None:
+            request_data["resource_id"] = resource_id
+
         # Send request to router
         response = await self._nats_client.request(
             "ipc.route.request",
@@ -386,7 +433,11 @@ class ServiceClient:
 
             # Create appropriate exception based on error code
             if error_code == 404:
-                raise ValueError(f"Service '{service_name}' not found")
+                # Check if this is a resource-not-found error
+                if resource_id and "resource" in error_msg.lower():
+                    raise ResourceNotFoundError(error_msg, resource_id=resource_id)
+                else:
+                    raise ValueError(f"Service '{service_name}' not found")
             elif error_code == 503:
                 raise RuntimeError(f"Service '{service_name}' unavailable: {error_msg}")
             elif error_code == 504:
@@ -396,3 +447,519 @@ class ServiceClient:
 
         # Return the result
         return response.get("result")
+
+    async def register_resource(
+        self,
+        service_name: str,
+        resource_ids: list[str],
+        metadata: dict[str, ResourceMetadata] | None = None,
+        force: bool = False,
+        instance_id: str | None = None,
+    ) -> ResourceRegistrationResponse:
+        """Register resources for a service instance.
+
+        Args:
+            service_name: Name of the service
+            resource_ids: List of resource IDs to register
+            metadata: Optional metadata for each resource ID
+            force: Force override existing registrations
+            instance_id: Instance ID, uses default if not provided
+
+        Returns:
+            ResourceRegistrationResponse with registration details
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+            ValueError: If validation fails
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Use provided instance_id or default
+        effective_instance_id = instance_id or self._instance_id
+
+        # Generate trace ID
+        trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+        # Create registration request
+        request = ResourceRegistrationRequest(
+            service_name=service_name,
+            instance_id=effective_instance_id,
+            resource_ids=resource_ids,
+            force=force,
+            metadata=metadata or {},
+            trace_id=trace_id,
+        )
+
+        # Send request
+        response = await self._nats_client.request(
+            "ipc.resource.register",
+            request.model_dump(),
+            timeout=self._timeout,
+        )
+
+        if response is None:
+            raise TimeoutError("Resource registration request timed out")
+
+        # Check for complete failure error
+        if (
+            not response.get("success", False)
+            and "error" in response
+            and "registered" not in response
+        ):
+            # This is a complete failure with no partial success
+            error = response.get("error", {})
+            error_code = error.get("code", "UNKNOWN_ERROR")
+            error_msg = error.get("message", "Resource registration failed")
+
+            if error_code == "VALIDATION_ERROR":
+                raise ValueError(f"Validation error: {error_msg}")
+            else:
+                raise Exception(f"Resource registration failed: {error_msg}")
+
+        # Parse response (may have partial success with conflicts)
+        result = ResourceRegistrationResponse(**response)
+
+        # Track registered resources
+        if result.registered:
+            if service_name not in self._registered_resources:
+                self._registered_resources[service_name] = set()
+            self._registered_resources[service_name].update(result.registered)
+
+        # Check for conflicts
+        if result.conflicts:
+            raise ResourceConflictError(
+                f"Resource conflicts detected: {len(result.conflicts)} resources already registered",
+                conflicts=result.conflicts,
+                registered=result.registered,
+            )
+
+        return result
+
+    async def release_resource(
+        self,
+        service_name: str,
+        resource_ids: list[str],
+        instance_id: str | None = None,
+    ) -> ResourceReleaseResponse:
+        """Release resources for a service instance.
+
+        Args:
+            service_name: Name of the service
+            resource_ids: List of resource IDs to release
+            instance_id: Instance ID, uses default if not provided
+
+        Returns:
+            ResourceReleaseResponse with release details
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+            ValueError: If validation fails
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Use provided instance_id or default
+        effective_instance_id = instance_id or self._instance_id
+
+        # Generate trace ID
+        trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+        # Create release request
+        request = ResourceReleaseRequest(
+            service_name=service_name,
+            instance_id=effective_instance_id,
+            resource_ids=resource_ids,
+            trace_id=trace_id,
+        )
+
+        # Send request
+        response = await self._nats_client.request(
+            "ipc.resource.release",
+            request.model_dump(),
+            timeout=self._timeout,
+        )
+
+        if response is None:
+            raise TimeoutError("Resource release request timed out")
+
+        # Parse response first
+        result = ResourceReleaseResponse(**response)
+
+        # Check for error in response - but allow partial success
+        if not response.get("success", False) and not result.released:
+            # Only raise error if no resources were released
+            error = response.get("error", {})
+            error_code = error.get("code", "UNKNOWN_ERROR")
+            error_msg = error.get("message", "Resource release failed")
+
+            if error_code == "VALIDATION_ERROR":
+                raise ValueError(f"Validation error: {error_msg}")
+            else:
+                raise Exception(f"Resource release failed: {error_msg}")
+
+        # Update tracked resources
+        if service_name in self._registered_resources:
+            self._registered_resources[service_name].difference_update(result.released)
+            if not self._registered_resources[service_name]:
+                del self._registered_resources[service_name]
+
+        return result
+
+    def get_registered_resources(self, service_name: str | None = None) -> dict[str, set[str]]:
+        """Get registered resources.
+
+        Args:
+            service_name: Optional service name to filter by
+
+        Returns:
+            Dictionary mapping service names to sets of resource IDs
+        """
+        if service_name:
+            return {service_name: self._registered_resources.get(service_name, set())}
+        return self._registered_resources.copy()
+
+    async def bulk_register_resource(
+        self,
+        service_name: str,
+        resources: list[tuple[str, ResourceMetadata]],
+        batch_size: int = 100,
+        continue_on_error: bool = False,
+        force: bool = False,
+        instance_id: str | None = None,
+        progress_callback: Any | None = None,
+    ) -> Any:
+        """Bulk register resources for a service instance.
+
+        Args:
+            service_name: Name of the service
+            resources: List of (resource_id, metadata) tuples
+            batch_size: Number of resources per batch (default: 100)
+            continue_on_error: Continue processing on errors
+            force: Force override existing registrations
+            instance_id: Instance ID, uses default if not provided
+            progress_callback: Optional async callback for progress updates
+
+        Returns:
+            BulkResourceRegistrationResponse with registration details
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+            ValueError: If validation fails
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Import models locally to avoid circular imports
+        from ipc_client_sdk.models import (
+            BulkResourceRegistrationRequest,
+            BulkResourceRegistrationResponse,
+            ResourceRegistrationItem,
+        )
+
+        # Use provided instance_id or default
+        effective_instance_id = instance_id or self._instance_id
+
+        # Generate trace ID
+        trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+        # Convert resources to ResourceRegistrationItem objects
+        resource_items = [
+            ResourceRegistrationItem(
+                resource_id=resource_id,
+                metadata=metadata,
+                force=force,
+            )
+            for resource_id, metadata in resources
+        ]
+
+        # Create bulk registration request
+        request = BulkResourceRegistrationRequest(
+            service_name=service_name,
+            instance_id=effective_instance_id,
+            resources=resource_items,
+            batch_size=batch_size,
+            continue_on_error=continue_on_error,
+            trace_id=trace_id,
+        )
+
+        # Send request with extended timeout for bulk operations
+        timeout = max(self._timeout * 3, 30.0)  # At least 30 seconds for bulk ops
+        response = await self._nats_client.request(
+            "ipc.resource.bulk_register",
+            request.model_dump(),
+            timeout=timeout,
+        )
+
+        if response is None:
+            raise TimeoutError("Bulk resource registration request timed out")
+
+        # Check for error in response
+        if not response.get("success", False):
+            error = response.get("error", {})
+            error_code = error.get("code", "UNKNOWN_ERROR")
+            error_msg = error.get("message", "Bulk resource registration failed")
+
+            if error_code == "VALIDATION_ERROR":
+                raise ValueError(f"Validation error: {error_msg}")
+            else:
+                raise Exception(f"Bulk resource registration failed: {error_msg}")
+
+        # Parse response
+        result = BulkResourceRegistrationResponse(**response)
+
+        # Track registered resources
+        if result.registered:
+            if service_name not in self._registered_resources:
+                self._registered_resources[service_name] = set()
+            self._registered_resources[service_name].update(result.registered)
+
+        # Notify progress callback if provided
+        if progress_callback:
+            await progress_callback(result)
+
+        return result
+
+    async def bulk_release_resource(
+        self,
+        service_name: str,
+        resource_ids: list[str],
+        batch_size: int = 100,
+        continue_on_error: bool = False,
+        transactional: bool = True,
+        instance_id: str | None = None,
+        progress_callback: Any | None = None,
+    ) -> Any:
+        """Bulk release resources for a service instance.
+
+        Args:
+            service_name: Name of the service
+            resource_ids: List of resource IDs to release
+            batch_size: Number of resources per batch (default: 100)
+            continue_on_error: Continue processing on errors
+            transactional: Use transactional processing with rollback
+            instance_id: Instance ID, uses default if not provided
+            progress_callback: Optional async callback for progress updates
+
+        Returns:
+            BulkResourceReleaseResponse with release details
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+            ValueError: If validation fails
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Import models locally to avoid circular imports
+        from ipc_client_sdk.models import (
+            BulkResourceReleaseRequest,
+            BulkResourceReleaseResponse,
+        )
+
+        # Use provided instance_id or default
+        effective_instance_id = instance_id or self._instance_id
+
+        # Generate trace ID
+        trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+        # Create bulk release request
+        request = BulkResourceReleaseRequest(
+            service_name=service_name,
+            instance_id=effective_instance_id,
+            resource_ids=resource_ids,
+            batch_size=batch_size,
+            continue_on_error=continue_on_error,
+            transactional=transactional,
+            trace_id=trace_id,
+        )
+
+        # Send request with extended timeout for bulk operations
+        timeout = max(self._timeout * 3, 30.0)  # At least 30 seconds for bulk ops
+        response = await self._nats_client.request(
+            "ipc.resource.bulk_release",
+            request.model_dump(),
+            timeout=timeout,
+        )
+
+        if response is None:
+            raise TimeoutError("Bulk resource release request timed out")
+
+        # Check for error in response
+        if not response.get("success", False):
+            error = response.get("error", {})
+            error_code = error.get("code", "UNKNOWN_ERROR")
+            error_msg = error.get("message", "Bulk resource release failed")
+
+            if error_code == "VALIDATION_ERROR":
+                raise ValueError(f"Validation error: {error_msg}")
+            else:
+                raise Exception(f"Bulk resource release failed: {error_msg}")
+
+        # Parse response
+        result = BulkResourceReleaseResponse(**response)
+
+        # Update tracked resources
+        if service_name in self._registered_resources:
+            self._registered_resources[service_name].difference_update(result.released)
+            if not self._registered_resources[service_name]:
+                del self._registered_resources[service_name]
+
+        # Notify progress callback if provided
+        if progress_callback:
+            await progress_callback(result)
+
+        return result
+
+    async def transfer_resource(
+        self,
+        service_name: str,
+        resource_ids: list[str],
+        to_instance_id: str,
+        from_instance_id: str | None = None,
+        verify_ownership: bool = True,
+        reason: str = "Manual transfer",
+    ) -> Any:
+        """Transfer resource ownership between instances.
+
+        Args:
+            service_name: Name of the service
+            resource_ids: List of resource IDs to transfer
+            to_instance_id: Target instance ID
+            from_instance_id: Current owner instance ID (uses default if not provided)
+            verify_ownership: Verify the sender owns the resources
+            reason: Transfer reason for audit trail
+
+        Returns:
+            ResourceTransferResponse with transfer details
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+            ValueError: If validation fails
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Import models locally to avoid circular imports
+        from ipc_client_sdk.models import (
+            ResourceTransferRequest,
+            ResourceTransferResponse,
+        )
+
+        # Use provided from_instance_id or default
+        effective_from_instance_id = from_instance_id or self._instance_id
+
+        # Generate trace ID
+        trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+        # Create transfer request
+        request = ResourceTransferRequest(
+            service_name=service_name,
+            resource_ids=resource_ids,
+            from_instance_id=effective_from_instance_id,
+            to_instance_id=to_instance_id,
+            verify_ownership=verify_ownership,
+            reason=reason,
+            trace_id=trace_id,
+        )
+
+        # Send request
+        response = await self._nats_client.request(
+            "ipc.resource.transfer",
+            request.model_dump(),
+            timeout=self._timeout,
+        )
+
+        if response is None:
+            raise TimeoutError("Resource transfer request timed out")
+
+        # Check for error in response
+        if not response.get("success", False):
+            error = response.get("error", {})
+            error_code = error.get("code", "UNKNOWN_ERROR")
+            error_msg = error.get("message", "Resource transfer failed")
+
+            if error_code == "VALIDATION_ERROR":
+                raise ValueError(f"Validation error: {error_msg}")
+            elif error_code == "FORBIDDEN":
+                raise PermissionError(f"Permission denied: {error_msg}")
+            else:
+                raise Exception(f"Resource transfer failed: {error_msg}")
+
+        # Parse response
+        result = ResourceTransferResponse(**response)
+
+        # Update tracked resources if transfer was from this instance
+        if (
+            effective_from_instance_id == self._instance_id
+            and service_name in self._registered_resources
+        ):
+            self._registered_resources[service_name].difference_update(result.transferred)
+            if not self._registered_resources[service_name]:
+                del self._registered_resources[service_name]
+
+        return result
+
+    async def bulk_register_with_retry(
+        self,
+        service_name: str,
+        resources: list[tuple[str, ResourceMetadata]],
+        batch_size: int = 100,
+        continue_on_error: bool = False,
+        force: bool = False,
+        instance_id: str | None = None,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        retry_multiplier: float = 2.0,
+        progress_callback: Any | None = None,
+    ) -> Any:
+        """Bulk register resources with automatic retry on failure.
+
+        Args:
+            service_name: Name of the service
+            resources: List of (resource_id, metadata) tuples
+            batch_size: Number of resources per batch
+            continue_on_error: Continue processing on errors
+            force: Force override existing registrations
+            instance_id: Instance ID, uses default if not provided
+            max_retries: Maximum number of retry attempts
+            retry_delay: Initial delay between retries in seconds
+            retry_multiplier: Multiplier for exponential backoff
+            progress_callback: Optional async callback for progress updates
+
+        Returns:
+            BulkResourceRegistrationResponse with registration details
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If all retry attempts fail
+            ValueError: If validation fails
+        """
+        last_error = None
+        current_delay = retry_delay
+
+        for attempt in range(max_retries + 1):
+            try:
+                return await self.bulk_register_resource(
+                    service_name=service_name,
+                    resources=resources,
+                    batch_size=batch_size,
+                    continue_on_error=continue_on_error,
+                    force=force,
+                    instance_id=instance_id,
+                    progress_callback=progress_callback,
+                )
+            except (TimeoutError, Exception) as e:
+                last_error = e
+                if attempt < max_retries:
+                    await asyncio.sleep(current_delay)
+                    current_delay *= retry_multiplier
+                    continue
+                raise
+
+        raise last_error or Exception("Bulk registration failed after all retries")

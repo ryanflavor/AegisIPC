@@ -236,8 +236,9 @@ class HealthChecker:
                     if last_hb.tzinfo is None:
                         last_hb = last_hb.replace(tzinfo=UTC)
 
-                    time_since_heartbeat = (now - last_hb).total_seconds()
-                    return time_since_heartbeat <= self._heartbeat_timeout
+                    time_since_heartbeat: float = (now - last_hb).total_seconds()
+                    result: bool = time_since_heartbeat <= self._heartbeat_timeout
+                    return result
 
             # Instance not found
             return False

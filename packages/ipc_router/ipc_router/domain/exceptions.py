@@ -191,6 +191,112 @@ class TimeoutError(ApplicationError):
         super().__init__(message, error_code="TIMEOUT", details=details)
 
 
+class ResourceConflictError(ConflictError):
+    """Raised when attempting to register an already owned resource."""
+
+    def __init__(self, resource_id: str, current_owner: str, **kwargs: Any) -> None:
+        """
+        Initialize resource conflict error.
+
+        Args:
+            resource_id: ID of the conflicting resource
+            current_owner: Current owner instance ID
+            **kwargs: Additional error details
+        """
+        message = f"Resource '{resource_id}' is already owned by instance '{current_owner}'"
+        super().__init__(
+            message,
+            conflicting_resource=resource_id,
+            details={"resource_id": resource_id, "current_owner": current_owner},
+        )
+
+
+class ResourceNotFoundError(NotFoundError):
+    """Raised when a requested resource is not found."""
+
+    def __init__(self, resource_id: str, **kwargs: Any) -> None:
+        """
+        Initialize resource not found error.
+
+        Args:
+            resource_id: ID of the missing resource
+            **kwargs: Additional error details
+        """
+        super().__init__("Resource", resource_id, **kwargs)
+
+
+class ResourceOwnershipError(DomainError):
+    """Raised when resource ownership validation fails."""
+
+    def __init__(
+        self, resource_id: str, instance_id: str, actual_owner: str, **kwargs: Any
+    ) -> None:
+        """
+        Initialize resource ownership error.
+
+        Args:
+            resource_id: ID of the resource
+            instance_id: Instance attempting the operation
+            actual_owner: Actual owner of the resource
+            **kwargs: Additional error details
+        """
+        message = (
+            f"Instance '{instance_id}' does not own resource '{resource_id}' "
+            f"(owned by '{actual_owner}')"
+        )
+        details = {
+            "resource_id": resource_id,
+            "instance_id": instance_id,
+            "actual_owner": actual_owner,
+            **kwargs.pop("details", {}),
+        }
+        super().__init__(message, error_code="RESOURCE_OWNERSHIP_ERROR", details=details)
+
+
+class ResourceReleaseError(DomainError):
+    """Raised when resource release fails."""
+
+    def __init__(self, message: str, resource_id: str | None = None, **kwargs: Any) -> None:
+        """
+        Initialize resource release error.
+
+        Args:
+            message: Error message
+            resource_id: ID of the resource that failed to release
+            **kwargs: Additional error details
+        """
+        details = kwargs.pop("details", {})
+        if resource_id:
+            details["resource_id"] = resource_id
+        super().__init__(message, error_code="RESOURCE_RELEASE_ERROR", details=details)
+
+
+class ResourceLimitExceededError(DomainError):
+    """Raised when an instance exceeds its resource limit."""
+
+    def __init__(self, instance_id: str, current_count: int, limit: int, **kwargs: Any) -> None:
+        """
+        Initialize resource limit exceeded error.
+
+        Args:
+            instance_id: Instance that exceeded the limit
+            current_count: Current number of resources
+            limit: Maximum allowed resources
+            **kwargs: Additional error details
+        """
+        message = (
+            f"Instance '{instance_id}' cannot register more resources "
+            f"(current: {current_count}, limit: {limit})"
+        )
+        details = {
+            "instance_id": instance_id,
+            "current_count": current_count,
+            "limit": limit,
+            **kwargs.pop("details", {}),
+        }
+        super().__init__(message, error_code="RESOURCE_LIMIT_EXCEEDED", details=details)
+
+
 class InfrastructureError(AegisIPCError):
     """Base class for infrastructure-layer errors."""
 
@@ -243,3 +349,10 @@ class ConfigurationError(InfrastructureError):
             **kwargs.pop("details", {}),
         }
         super().__init__(message, error_code="CONFIGURATION_ERROR", details=details)
+
+
+# Resource-related exceptions
+class ResourceError(DomainError):
+    """Base class for resource-related errors."""
+
+    pass

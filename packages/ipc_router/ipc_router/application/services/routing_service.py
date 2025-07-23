@@ -6,7 +6,10 @@ import time
 from typing import TYPE_CHECKING
 
 from ipc_router.application.models.routing_models import RouteRequest, RouteResponse
-from ipc_router.domain.exceptions import NotFoundError, ServiceUnavailableError
+from ipc_router.domain.exceptions import (
+    NotFoundError,
+    ServiceUnavailableError,
+)
 from ipc_router.domain.interfaces.load_balancer import LoadBalancer
 from ipc_router.domain.strategies.round_robin import RoundRobinLoadBalancer
 from ipc_router.infrastructure.logging import get_logger

@@ -29,7 +29,7 @@ class HeartbeatHandler:
         """
         self.nats_client = nats_client
         self.service_registry = service_registry
-        self._subscription = None
+        self._subscription: Any | None = None
         self._subject = "ipc.service.heartbeat"
 
     async def start(self) -> None:
@@ -53,6 +53,8 @@ class HeartbeatHandler:
             msg: NATS message containing heartbeat data
         """
         trace_id = None
+        response: dict[str, Any] = {}
+
         try:
             # Unpack the heartbeat data
             heartbeat_data = msgpack.unpackb(msg.data)
@@ -162,7 +164,7 @@ class HeartbeatHandler:
             )
 
         # Send response if reply subject exists
-        if msg.reply:
+        if msg.reply and response:
             try:
                 await self.nats_client.publish(msg.reply, response)
             except Exception as e:

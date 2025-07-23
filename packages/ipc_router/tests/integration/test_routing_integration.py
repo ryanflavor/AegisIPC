@@ -16,7 +16,7 @@ from ipc_router.domain.strategies.round_robin import RoundRobinLoadBalancer
 class TestRoutingIntegration:
     """Integration tests for routing functionality."""
 
-    async def test_basic_routing_flow(self):
+    async def test_basic_routing_flow(self) -> None:
         """Test basic routing flow with multiple instances."""
         # Setup services
         registry = ServiceRegistry()
@@ -55,7 +55,7 @@ class TestRoutingIntegration:
         # Verify round-robin distribution
         assert routed_instances == ["inst-1", "inst-2", "inst-3"] * 2
 
-    async def test_routing_with_unhealthy_instances(self):
+    async def test_routing_with_unhealthy_instances(self) -> None:
         """Test routing skips unhealthy instances."""
         registry = ServiceRegistry()
         routing_service = RoutingService(registry)
@@ -90,7 +90,7 @@ class TestRoutingIntegration:
         assert "inst-2" not in routed_instances
         assert set(routed_instances) == {"inst-1", "inst-3"}
 
-    async def test_routing_no_instances_available(self):
+    async def test_routing_no_instances_available(self) -> None:
         """Test routing when no instances are available."""
         registry = ServiceRegistry()
         routing_service = RoutingService(registry)
@@ -108,7 +108,7 @@ class TestRoutingIntegration:
         assert response.error["code"] == 404
         assert "not found" in response.error["message"]
 
-    async def test_routing_all_instances_unhealthy(self):
+    async def test_routing_all_instances_unhealthy(self) -> None:
         """Test routing when all instances are unhealthy."""
         registry = ServiceRegistry()
         routing_service = RoutingService(registry)
@@ -142,7 +142,7 @@ class TestRoutingIntegration:
         assert response.error["code"] == 503
         assert "No healthy instances" in response.error["message"]
 
-    async def test_health_check_integration(self):
+    async def test_health_check_integration(self) -> None:
         """Test health checker marks stale instances as unhealthy."""
         registry = ServiceRegistry()
         routing_service = RoutingService(registry)
@@ -196,7 +196,7 @@ class TestRoutingIntegration:
         finally:
             await health_checker.stop()
 
-    async def test_concurrent_routing_requests(self):
+    async def test_concurrent_routing_requests(self) -> None:
         """Test concurrent routing requests are handled correctly."""
         registry = ServiceRegistry()
         routing_service = RoutingService(registry)
@@ -213,7 +213,7 @@ class TestRoutingIntegration:
             await registry.register_service(request)
 
         # Create many concurrent requests
-        async def make_request(request_id: int):
+        async def make_request(request_id: int) -> str | None:
             route_request = RouteRequest(
                 service_name=service_name,
                 method="concurrent_test",
@@ -231,22 +231,23 @@ class TestRoutingIntegration:
         assert all(r is not None for r in results)
 
         # Count distribution
-        distribution = {}
+        distribution: dict[str, int] = {}
         for instance_id in results:
-            distribution[instance_id] = distribution.get(instance_id, 0) + 1
+            if instance_id is not None:
+                distribution[instance_id] = distribution.get(instance_id, 0) + 1
 
         # Should be evenly distributed (20 requests per instance)
         assert len(distribution) == num_instances
         for count in distribution.values():
             assert count == 20
 
-    async def test_service_event_notifications(self):
+    async def test_service_event_notifications(self) -> None:
         """Test service registry event notifications."""
         registry = ServiceRegistry()
         events_received = []
 
         # Subscribe to events
-        async def event_handler(event):
+        async def event_handler(event: object) -> None:
             events_received.append(event)
 
         registry.subscribe_to_events(None, event_handler)

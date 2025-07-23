@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ..enums import ServiceStatus
+from ipc_router.domain.enums import ServiceStatus
 
 
 @dataclass

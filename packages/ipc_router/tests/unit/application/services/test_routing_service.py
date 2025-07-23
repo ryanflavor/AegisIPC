@@ -16,7 +16,7 @@ from ipc_router.domain.enums import ServiceStatus
 class TestRoutingService:
     """Test cases for RoutingService."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.mock_registry = AsyncMock()
         from ipc_router.domain.interfaces.load_balancer import LoadBalancer
@@ -24,13 +24,13 @@ class TestRoutingService:
         self.mock_load_balancer = Mock(spec=LoadBalancer)
         self.routing_service = RoutingService(self.mock_registry, self.mock_load_balancer)
 
-    async def test_initialization_with_default_load_balancer(self):
+    async def test_initialization_with_default_load_balancer(self) -> None:
         """Test initialization with default load balancer."""
         service = RoutingService(self.mock_registry)
         assert service._registry is self.mock_registry
         assert service._load_balancer is not None
 
-    async def test_route_request_success(self):
+    async def test_route_request_success(self) -> None:
         """Test successful request routing."""
         # Setup mock instances
         instances = [
@@ -77,7 +77,7 @@ class TestRoutingService:
         self.mock_registry.get_healthy_instances.assert_called_once_with("test-service")
         self.mock_load_balancer.select_instance.assert_called_once_with(instances, "test-service")
 
-    async def test_route_request_no_healthy_instances(self):
+    async def test_route_request_no_healthy_instances(self) -> None:
         """Test routing when no healthy instances are available."""
         # Configure mocks
         self.mock_registry.get_healthy_instances.return_value = []
@@ -99,7 +99,7 @@ class TestRoutingService:
         assert response.error["code"] == 503
         assert "unavailable" in response.error["message"]
 
-    async def test_route_request_service_not_found(self):
+    async def test_route_request_service_not_found(self) -> None:
         """Test routing when service is not found."""
         # Configure mocks to raise NotFoundError
         from ipc_router.domain.exceptions import NotFoundError
@@ -124,7 +124,7 @@ class TestRoutingService:
         assert response.error["code"] == 404
         assert "not found" in response.error["message"]
 
-    async def test_route_request_load_balancer_returns_none(self):
+    async def test_route_request_load_balancer_returns_none(self) -> None:
         """Test when load balancer cannot select an instance."""
         # Setup mock instances
         instances = [
@@ -157,7 +157,7 @@ class TestRoutingService:
         assert response.error["code"] == 503
         assert "unavailable" in response.error["message"]
 
-    async def test_route_request_unexpected_error(self):
+    async def test_route_request_unexpected_error(self) -> None:
         """Test handling of unexpected errors during routing."""
         # Configure mocks to raise unexpected error
         self.mock_registry.get_healthy_instances.side_effect = RuntimeError("Unexpected error")
@@ -178,7 +178,7 @@ class TestRoutingService:
         assert response.error["code"] == 500
         assert response.error["message"] == "Unexpected error"
 
-    async def test_route_request_with_metadata(self):
+    async def test_route_request_with_metadata(self) -> None:
         """Test routing request with metadata."""
         # Setup mock instance
         instance = ServiceInstance(
@@ -208,7 +208,7 @@ class TestRoutingService:
         assert response.success is True
         assert response.instance_id == "inst-1"
 
-    async def test_route_request_no_timeout(self):
+    async def test_route_request_no_timeout(self) -> None:
         """Test routing request without timeout."""
         # Setup mock instance
         instance = ServiceInstance(
@@ -237,7 +237,7 @@ class TestRoutingService:
         assert response.success is True
         assert response.instance_id == "inst-1"
 
-    async def test_logging_on_successful_routing(self):
+    async def test_logging_on_successful_routing(self) -> None:
         """Test that successful routing is logged properly."""
         # Setup mock instance
         instance = ServiceInstance(
@@ -265,7 +265,7 @@ class TestRoutingService:
         # Verify success
         assert response.success is True
 
-    async def test_trace_id_propagation(self):
+    async def test_trace_id_propagation(self) -> None:
         """Test that trace_id is properly propagated through the response."""
         # Setup mock instance
         instance = ServiceInstance(

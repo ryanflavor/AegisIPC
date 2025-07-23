@@ -13,19 +13,19 @@ from ipc_router.domain.strategies.round_robin import RoundRobinLoadBalancer
 class TestRoundRobinLoadBalancer:
     """Test cases for RoundRobinLoadBalancer."""
 
-    def test_initialization(self):
+    def test_initialization(self) -> None:
         """Test load balancer initialization."""
         lb = RoundRobinLoadBalancer()
         assert lb._service_indices == {}
         assert isinstance(lb._lock, threading.Lock)
 
-    def test_select_instance_empty_list(self):
+    def test_select_instance_empty_list(self) -> None:
         """Test selection with empty instance list."""
         lb = RoundRobinLoadBalancer()
         result = lb.select_instance([], "test-service")
         assert result is None
 
-    def test_select_instance_no_healthy_instances(self):
+    def test_select_instance_no_healthy_instances(self) -> None:
         """Test selection when all instances are unhealthy."""
         lb = RoundRobinLoadBalancer()
 
@@ -50,7 +50,7 @@ class TestRoundRobinLoadBalancer:
         result = lb.select_instance(instances, "test-service")
         assert result is None
 
-    def test_select_instance_single_healthy(self):
+    def test_select_instance_single_healthy(self) -> None:
         """Test selection with single healthy instance."""
         lb = RoundRobinLoadBalancer()
 
@@ -69,7 +69,7 @@ class TestRoundRobinLoadBalancer:
             result = lb.select_instance(instances, "test-service")
             assert result == instance
 
-    def test_round_robin_distribution(self):
+    def test_round_robin_distribution(self) -> None:
         """Test round-robin distribution across multiple instances."""
         lb = RoundRobinLoadBalancer()
 
@@ -95,7 +95,7 @@ class TestRoundRobinLoadBalancer:
         expected = ["inst-1", "inst-2", "inst-3"] * 3
         assert selections == expected
 
-    def test_round_robin_with_mixed_health(self):
+    def test_round_robin_with_mixed_health(self) -> None:
         """Test round-robin with mix of healthy and unhealthy instances."""
         lb = RoundRobinLoadBalancer()
 
@@ -134,7 +134,7 @@ class TestRoundRobinLoadBalancer:
         expected = ["inst-1", "inst-3"] * 3
         assert selections == expected
 
-    def test_multiple_services_isolated(self):
+    def test_multiple_services_isolated(self) -> None:
         """Test that different services maintain separate indices."""
         lb = RoundRobinLoadBalancer()
 
@@ -171,7 +171,7 @@ class TestRoundRobinLoadBalancer:
         # Verify independent round-robin for each service
         assert results == ["a-1", "b-1", "a-2", "b-2", "a-1", "b-1"]
 
-    def test_reset_service(self):
+    def test_reset_service(self) -> None:
         """Test resetting index for a specific service."""
         lb = RoundRobinLoadBalancer()
 
@@ -195,7 +195,7 @@ class TestRoundRobinLoadBalancer:
         result = lb.select_instance(instances, "test-service")
         assert result.instance_id == "inst-1"
 
-    def test_remove_instance(self):
+    def test_remove_instance(self) -> None:
         """Test removing an instance resets the index."""
         lb = RoundRobinLoadBalancer()
 
@@ -219,7 +219,7 @@ class TestRoundRobinLoadBalancer:
         result = lb.select_instance(instances, "test-service")
         assert result.instance_id == "inst-1"
 
-    def test_thread_safety(self):
+    def test_thread_safety(self) -> None:
         """Test thread-safe operations."""
         lb = RoundRobinLoadBalancer()
 
@@ -237,7 +237,7 @@ class TestRoundRobinLoadBalancer:
         selections = []
         lock = threading.Lock()
 
-        def select_many():
+        def select_many() -> None:
             for _ in range(100):
                 result = lb.select_instance(instances, "test-service")
                 with lock:
@@ -258,7 +258,7 @@ class TestRoundRobinLoadBalancer:
         assert len(selections) == 1000
 
         # Count occurrences of each instance
-        counts = {}
+        counts: dict[str, int] = {}
         for sel in selections:
             counts[sel] = counts.get(sel, 0) + 1
 
@@ -266,7 +266,7 @@ class TestRoundRobinLoadBalancer:
         for instance_id in [f"inst-{i}" for i in range(1, 11)]:
             assert counts[instance_id] == 100
 
-    def test_heartbeat_timeout_filtering(self):
+    def test_heartbeat_timeout_filtering(self) -> None:
         """Test filtering based on heartbeat timeout."""
         lb = RoundRobinLoadBalancer()
 

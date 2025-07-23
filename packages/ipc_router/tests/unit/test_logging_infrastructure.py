@@ -273,7 +273,10 @@ class TestSetupLogging:
 
         # Verify existing handlers were cleared (implementation uses clear())
         # The implementation uses handlers.clear() instead of removeHandler
-        # Since clear() is a built-in method, we need to mock it properly\n        # Let's just verify that the handlers list is empty after setup\n        # The implementation calls handlers.clear() internally\n        assert len(mock_root_logger.handlers) == 0
+        # Since clear() is a built-in method, we need to mock it properly
+        # Let's just verify that the handlers list is empty after setup
+        # The implementation calls handlers.clear() internally
+        assert len(mock_root_logger.handlers) == 0
 
     @patch("logging.getLogger")
     def test_setup_with_invalid_level(self, mock_get_logger: MagicMock) -> None:

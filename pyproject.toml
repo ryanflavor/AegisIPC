@@ -190,6 +190,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "slow: Slow tests",
+    "e2e: End-to-end tests",
 ]
 asyncio_default_fixture_loop_scope = "function"
 

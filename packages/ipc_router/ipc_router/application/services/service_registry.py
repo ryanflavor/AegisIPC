@@ -17,7 +17,10 @@ from ipc_client_sdk.models import (
 from ipc_router.domain.entities import Service, ServiceInstance
 from ipc_router.domain.enums import ServiceStatus
 from ipc_router.domain.events import InstanceStatusChangedEvent, ServiceEvent, ServiceEventType
-from ipc_router.domain.exceptions import DuplicateServiceInstanceError, NotFoundError
+from ipc_router.domain.exceptions import (
+    DuplicateServiceInstanceError,
+    NotFoundError,
+)
 from ipc_router.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -350,7 +353,9 @@ class ServiceRegistry:
                 )
 
             service = self._services[service_name]
-            healthy_instances = service.get_healthy_instances(timeout_seconds)
+            healthy_instances: list[ServiceInstance] = service.get_healthy_instances(
+                timeout_seconds
+            )
 
             logger.debug(
                 "Retrieved healthy instances",

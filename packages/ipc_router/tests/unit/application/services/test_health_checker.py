@@ -18,7 +18,7 @@ from ipc_router.domain.events import ServiceEventType
 class TestHealthChecker:
     """Test cases for HealthChecker service."""
 
-    def setup_method(self):
+    def setup_method(self) -> None:
         """Set up test fixtures."""
         self.mock_registry = AsyncMock(spec=ServiceRegistry)
         self.check_interval = 1.0
@@ -29,7 +29,7 @@ class TestHealthChecker:
             heartbeat_timeout=self.heartbeat_timeout,
         )
 
-    async def test_initialization(self):
+    async def test_initialization(self) -> None:
         """Test health checker initialization."""
         assert self.health_checker._registry is self.mock_registry
         assert self.health_checker._check_interval == self.check_interval
@@ -43,7 +43,7 @@ class TestHealthChecker:
             self.health_checker._handle_heartbeat_event,
         )
 
-    async def test_start_health_checker(self):
+    async def test_start_health_checker(self) -> None:
         """Test starting the health checker."""
         # Start the health checker
         await self.health_checker.start()
@@ -55,7 +55,7 @@ class TestHealthChecker:
         # Clean up
         await self.health_checker.stop()
 
-    async def test_start_already_running(self):
+    async def test_start_already_running(self) -> None:
         """Test starting health checker when already running."""
         # Start the health checker
         await self.health_checker.start()
@@ -69,7 +69,7 @@ class TestHealthChecker:
         # Clean up
         await self.health_checker.stop()
 
-    async def test_stop_health_checker(self):
+    async def test_stop_health_checker(self) -> None:
         """Test stopping the health checker."""
         # Start first
         await self.health_checker.start()
@@ -81,13 +81,13 @@ class TestHealthChecker:
         assert self.health_checker._running is False
         assert task.cancelled()
 
-    async def test_stop_when_not_running(self):
+    async def test_stop_when_not_running(self) -> None:
         """Test stopping health checker when not running."""
         # Should not raise any error
         await self.health_checker.stop()
         assert self.health_checker._running is False
 
-    async def test_check_all_services_no_services(self):
+    async def test_check_all_services_no_services(self) -> None:
         """Test health check when no services are registered."""
         # Mock empty service list
         self.mock_registry.list_services.return_value = ServiceListResponse(
@@ -99,7 +99,7 @@ class TestHealthChecker:
         self.mock_registry.list_services.assert_called_once()
         self.mock_registry.update_instance_status.assert_not_called()
 
-    async def test_check_all_services_healthy_instances(self):
+    async def test_check_all_services_healthy_instances(self) -> None:
         """Test health check with all healthy instances."""
         now = datetime.now(UTC)
 
@@ -135,7 +135,7 @@ class TestHealthChecker:
         # Should not update any instance status
         self.mock_registry.update_instance_status.assert_not_called()
 
-    async def test_check_all_services_stale_heartbeat(self):
+    async def test_check_all_services_stale_heartbeat(self) -> None:
         """Test health check marks instances with stale heartbeat as unhealthy."""
         now = datetime.now(UTC)
 
@@ -173,7 +173,7 @@ class TestHealthChecker:
             "test-service", "inst-2", ServiceStatus.UNHEALTHY
         )
 
-    async def test_check_all_services_no_heartbeat(self):
+    async def test_check_all_services_no_heartbeat(self) -> None:
         """Test health check uses registration time when no heartbeat exists."""
         now = datetime.now(UTC)
 
@@ -202,7 +202,7 @@ class TestHealthChecker:
             "test-service", "inst-1", ServiceStatus.UNHEALTHY
         )
 
-    async def test_check_all_services_already_unhealthy(self):
+    async def test_check_all_services_already_unhealthy(self) -> None:
         """Test health check doesn't update already unhealthy instances."""
         now = datetime.now(UTC)
 
@@ -228,7 +228,7 @@ class TestHealthChecker:
         # Should not update status
         self.mock_registry.update_instance_status.assert_not_called()
 
-    async def test_check_all_services_timezone_handling(self):
+    async def test_check_all_services_timezone_handling(self) -> None:
         """Test health check handles naive datetime objects."""
         now = datetime.now()  # Naive datetime
 
@@ -252,7 +252,7 @@ class TestHealthChecker:
         # Should not raise any timezone errors
         await self.health_checker._check_all_services()
 
-    async def test_mark_instance_unhealthy_success(self):
+    async def test_mark_instance_unhealthy_success(self) -> None:
         """Test successfully marking instance as unhealthy."""
         await self.health_checker._mark_instance_unhealthy("test-service", "inst-1", 35.5)
 
@@ -260,14 +260,14 @@ class TestHealthChecker:
             "test-service", "inst-1", ServiceStatus.UNHEALTHY
         )
 
-    async def test_mark_instance_unhealthy_error(self):
+    async def test_mark_instance_unhealthy_error(self) -> None:
         """Test error handling when marking instance unhealthy fails."""
         self.mock_registry.update_instance_status.side_effect = RuntimeError("Update failed")
 
         # Should not raise exception
         await self.health_checker._mark_instance_unhealthy("test-service", "inst-1", 35.5)
 
-    async def test_handle_heartbeat_event(self):
+    async def test_handle_heartbeat_event(self) -> None:
         """Test handling heartbeat events."""
         from ipc_router.domain.events import ServiceEvent
 
@@ -281,7 +281,7 @@ class TestHealthChecker:
         # Should not raise any error
         await self.health_checker._handle_heartbeat_event(event)
 
-    async def test_check_instance_health_healthy(self):
+    async def test_check_instance_health_healthy(self) -> None:
         """Test checking health of a specific healthy instance."""
         now = datetime.now(UTC)
 
@@ -303,7 +303,7 @@ class TestHealthChecker:
 
         assert result is True
 
-    async def test_check_instance_health_unhealthy_status(self):
+    async def test_check_instance_health_unhealthy_status(self) -> None:
         """Test checking health of instance with unhealthy status."""
         now = datetime.now(UTC)
 
@@ -324,7 +324,7 @@ class TestHealthChecker:
 
         assert result is False
 
-    async def test_check_instance_health_stale_heartbeat(self):
+    async def test_check_instance_health_stale_heartbeat(self) -> None:
         """Test checking health of instance with stale heartbeat."""
         now = datetime.now(UTC)
 
@@ -345,7 +345,7 @@ class TestHealthChecker:
 
         assert result is False
 
-    async def test_check_instance_health_not_found(self):
+    async def test_check_instance_health_not_found(self) -> None:
         """Test checking health of non-existent instance."""
         from ipc_router.domain.entities.service import Service
 
@@ -356,7 +356,7 @@ class TestHealthChecker:
 
         assert result is False
 
-    async def test_check_instance_health_error(self):
+    async def test_check_instance_health_error(self) -> None:
         """Test error handling in instance health check."""
         self.mock_registry.get_service.side_effect = RuntimeError("Service lookup failed")
 
@@ -364,11 +364,11 @@ class TestHealthChecker:
 
         assert result is False
 
-    async def test_health_check_loop_continuous_operation(self):
+    async def test_health_check_loop_continuous_operation(self) -> None:
         """Test health check loop runs continuously."""
         check_count = 0
 
-        async def mock_check_all():
+        async def mock_check_all() -> None:
             nonlocal check_count
             check_count += 1
             if check_count >= 3:
@@ -383,11 +383,11 @@ class TestHealthChecker:
 
         assert check_count == 3
 
-    async def test_health_check_loop_error_recovery(self):
+    async def test_health_check_loop_error_recovery(self) -> None:
         """Test health check loop continues after errors."""
         check_count = 0
 
-        async def mock_check_all():
+        async def mock_check_all() -> None:
             nonlocal check_count
             check_count += 1
             if check_count == 1:
@@ -404,10 +404,10 @@ class TestHealthChecker:
 
         assert check_count == 3  # Should continue after error
 
-    async def test_health_check_loop_cancellation(self):
+    async def test_health_check_loop_cancellation(self) -> None:
         """Test health check loop handles cancellation properly."""
 
-        async def mock_check_all():
+        async def mock_check_all() -> None:
             await asyncio.sleep(0)
 
         with (
