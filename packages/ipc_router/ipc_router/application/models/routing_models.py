@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -20,6 +21,12 @@ class RouteRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict, description="Method parameters")
     timeout: float = Field(default=5.0, gt=0, le=300, description="Request timeout in seconds")
     trace_id: str = Field(..., description="Distributed tracing ID")
+    message_id: UUID | None = Field(
+        default=None, description="Unique message ID for exactly-once delivery"
+    )
+    require_ack: bool = Field(
+        default=False, description="Whether this request requires acknowledgment"
+    )
 
     @field_validator("service_name")
     @classmethod
@@ -46,6 +53,8 @@ class RouteRequest(BaseModel):
                 "params": {"user_id": "123"},
                 "timeout": 5.0,
                 "trace_id": "trace-abc-123",
+                "message_id": "550e8400-e29b-41d4-a716-446655440000",
+                "require_ack": False,
             }
         }
     }
@@ -62,6 +71,9 @@ class RouteResponse(BaseModel):
     error: dict[str, Any] | None = Field(default=None, description="Error details if failed")
     instance_id: str | None = Field(default=None, description="ID of instance that handled request")
     trace_id: str = Field(..., description="Distributed tracing ID")
+    message_id: UUID | None = Field(
+        default=None, description="Message ID for tracking acknowledgments"
+    )
     duration_ms: float | None = Field(default=None, description="Total duration in milliseconds")
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(UTC), description="Response timestamp"

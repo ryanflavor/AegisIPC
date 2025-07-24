@@ -276,7 +276,8 @@ class TestNATSIntegration:
 
         # Create request with large metadata
         large_metadata = {
-            f"key_{i}": f"value_{i}" * 100 for i in range(100)  # 600 bytes per entry  # 60KB total
+            f"key_{i}": f"value_{i}" * 100
+            for i in range(100)  # 600 bytes per entry  # 60KB total
         }
 
         request = ServiceRegistrationRequest(

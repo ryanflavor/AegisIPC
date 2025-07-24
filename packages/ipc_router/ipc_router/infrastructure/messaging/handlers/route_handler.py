@@ -7,15 +7,17 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from ipc_router.application.decorators import idempotent_handler
 from ipc_router.application.error_handling import RetryConfig, with_retry
 from ipc_router.application.models.routing_models import RouteRequest, RouteResponse
-from ipc_router.domain.exceptions import ServiceUnavailableError
+from ipc_router.domain.exceptions import DuplicateMessageError, ServiceUnavailableError
 from ipc_router.infrastructure.logging import get_logger
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 if TYPE_CHECKING:
     from ipc_router.application.services.routing_service import RoutingService
+    from ipc_router.domain.interfaces.message_store import MessageStore
     from ipc_router.infrastructure.messaging.nats_client import NATSClient
 
 logger = get_logger(__name__)
@@ -32,6 +34,7 @@ class RouteRequestHandler:
         self,
         nats_client: NATSClient,
         routing_service: RoutingService,
+        message_store: MessageStore | None = None,
         route_subject: str = "ipc.route.request",
     ) -> None:
         """Initialize the route request handler.
@@ -39,17 +42,35 @@ class RouteRequestHandler:
         Args:
             nats_client: NATS client for messaging
             routing_service: Service for routing logic
+            message_store: Optional message store for idempotent handling
             route_subject: Subject to listen for routing requests
         """
         self._nats = nats_client
         self._routing_service = routing_service
+        self._message_store = message_store
         self._route_subject = route_subject
         self._retry_config = RetryConfig(max_attempts=3, initial_delay=0.5)
         # Track active requests for correlation
         self._active_requests: dict[str, asyncio.Future[Any]] = {}
+
+        # Setup idempotent handler if message store is provided
+        self._handle_impl: Callable[[Any, str | None], Any]
+        if self._message_store:
+            self._handle_impl = idempotent_handler(
+                message_store=self._message_store,
+                message_id_getter=lambda data, reply_subject: (
+                    data.get("message_id") if isinstance(data, dict) else None
+                ),
+            )(self._handle_route_request_impl)
+        else:
+            self._handle_impl = self._handle_route_request_raw
+
         logger.info(
             "RouteRequestHandler initialized",
-            extra={"route_subject": route_subject},
+            extra={
+                "route_subject": route_subject,
+                "idempotent_enabled": self._message_store is not None,
+            },
         )
 
     async def start(self) -> None:
@@ -74,7 +95,7 @@ class RouteRequestHandler:
         logger.info("Stopped route request handler")
 
     async def _handle_route_request(self, data: Any, reply_subject: str | None) -> None:
-        """Handle incoming routing request.
+        """Handle incoming routing request with exception handling.
 
         Args:
             data: Deserialized request data
@@ -83,32 +104,24 @@ class RouteRequestHandler:
         start_time = time.time()
 
         try:
-            # Parse request
-            route_request = RouteRequest(**data)
-
-            logger.debug(
-                "Received route request",
+            await self._handle_impl(data, reply_subject)
+        except DuplicateMessageError as e:
+            # Handle duplicate message - return cached response
+            logger.info(
+                "Duplicate message detected, returning cached response",
                 extra={
-                    "service_name": route_request.service_name,
-                    "method": route_request.method,
-                    "trace_id": route_request.trace_id,
+                    "message_id": e.message_id,
+                    "subject": self._route_subject,
                 },
             )
 
-            # Get routing decision
-            route_response = await self._routing_service.route_request(route_request)
-
-            if not route_response.success:
-                # Send error response
-                await self._send_response(reply_subject or "", route_response)
-                return
-
-            # Forward request to selected instance
-            await self._forward_request(
-                route_request,
-                route_response.instance_id,
-                reply_subject or "",
-            )
+            if e.cached_response and reply_subject:
+                # Check if cached response is already a RouteResponse
+                if isinstance(e.cached_response, RouteResponse):
+                    await self._send_response(reply_subject, e.cached_response)
+                else:
+                    # If not a RouteResponse, send directly as serialized data
+                    await self._nats.publish(reply_subject, e.cached_response)
 
         except Exception as e:
             logger.error(
@@ -134,6 +147,47 @@ class RouteRequestHandler:
 
             if reply_subject:
                 await self._send_response(reply_subject, error_response)
+
+    async def _handle_route_request_raw(self, data: Any, reply_subject: str | None) -> None:
+        """Raw implementation of route request handling (without idempotency).
+
+        Args:
+            data: Deserialized request data
+            reply_subject: Subject to send response to
+        """
+        # Parse request
+        route_request = RouteRequest(**data)
+
+        logger.debug(
+            "Received route request",
+            extra={
+                "service_name": route_request.service_name,
+                "method": route_request.method,
+                "trace_id": route_request.trace_id,
+            },
+        )
+
+        # Get routing decision
+        route_response = await self._routing_service.route_request(route_request)
+
+        if not route_response.success:
+            # Send error response
+            await self._send_response(reply_subject or "", route_response)
+            return
+
+        # Forward request to selected instance
+        await self._forward_request(
+            route_request,
+            route_response.instance_id,
+            reply_subject or "",
+        )
+
+    async def _handle_route_request_impl(self, data: Any, reply_subject: str | None) -> None:
+        """Implementation with potential idempotency wrapper.
+
+        This method might be wrapped by idempotent_handler decorator.
+        """
+        await self._handle_route_request_raw(data, reply_subject)
 
     async def _forward_request(
         self,

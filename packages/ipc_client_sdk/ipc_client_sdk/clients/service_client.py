@@ -43,6 +43,25 @@ class ServiceClientConfig:
     retry_delay: float = 0.5
 
 
+@dataclass
+class ReliableDeliveryConfig:
+    """Configuration for reliable message delivery.
+
+    Attributes:
+        require_ack: Whether to require acknowledgment
+        ack_timeout: Timeout for acknowledgment in seconds
+        max_retries: Maximum number of retry attempts
+        retry_delay: Initial delay between retries in seconds
+        retry_multiplier: Multiplier for exponential backoff
+    """
+
+    require_ack: bool = True
+    ack_timeout: float = 30.0
+    max_retries: int = 3
+    retry_delay: float = 1.0
+    retry_multiplier: float = 2.0
+
+
 class ServiceRegistrationError(Exception):
     """Raised when service registration fails."""
 
@@ -94,6 +113,30 @@ class ResourceNotFoundError(Exception):
         """
         super().__init__(message)
         self.resource_id = resource_id
+
+
+class AcknowledgmentTimeoutError(Exception):
+    """Raised when acknowledgment is not received within timeout."""
+
+    def __init__(
+        self,
+        message: str,
+        message_id: str,
+        timeout: float,
+        service_name: str | None = None,
+    ) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Error message
+            message_id: The message ID that timed out
+            timeout: The timeout value in seconds
+            service_name: Optional service name
+        """
+        super().__init__(message)
+        self.message_id = message_id
+        self.timeout = timeout
+        self.service_name = service_name
 
 
 class NATSClient:
@@ -401,6 +444,9 @@ class ServiceClient:
         if trace_id is None:
             trace_id = f"trace_{uuid.uuid4().hex[:16]}"
 
+        # Generate message ID for tracking
+        message_id = str(uuid.uuid4())
+
         # Build request data
         request_data = {
             "service_name": service_name,
@@ -408,6 +454,7 @@ class ServiceClient:
             "params": params or {},
             "timeout": timeout or self._timeout,
             "trace_id": trace_id,
+            "message_id": message_id,
         }
 
         # Add resource_id if provided
@@ -447,6 +494,281 @@ class ServiceClient:
 
         # Return the result
         return response.get("result")
+
+    async def call_reliable(
+        self,
+        service_name: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        trace_id: str | None = None,
+        resource_id: str | None = None,
+        delivery_config: ReliableDeliveryConfig | None = None,
+    ) -> Any:
+        """Call a method on a service with reliable delivery guarantees.
+
+        This method ensures at-least-once delivery with acknowledgment tracking.
+        It will automatically retry on failures and wait for acknowledgments.
+
+        Args:
+            service_name: Name of the target service
+            method: Method to call on the service
+            params: Method parameters (optional)
+            timeout: Request timeout in seconds (uses default if not provided)
+            trace_id: Optional trace ID for distributed tracing
+            resource_id: Optional resource ID for resource-aware routing
+            delivery_config: Optional reliable delivery configuration
+
+        Returns:
+            The result from the method call
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+            AcknowledgmentTimeoutError: If acknowledgment not received
+            Exception: If the service call fails after all retries
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Use provided config or default
+        config = delivery_config or ReliableDeliveryConfig()
+
+        # Generate trace ID if not provided
+        if trace_id is None:
+            trace_id = f"trace_{uuid.uuid4().hex[:16]}"
+
+        # Track the last error for retry logic
+        last_error = None
+        current_delay = config.retry_delay
+
+        for attempt in range(config.max_retries + 1):
+            try:
+                # Generate message ID for tracking
+                message_id = str(uuid.uuid4())
+
+                # Build request data with reliable delivery flags
+                request_data = {
+                    "service_name": service_name,
+                    "method": method,
+                    "params": params or {},
+                    "timeout": timeout or self._timeout,
+                    "trace_id": trace_id,
+                    "message_id": message_id,
+                    "require_ack": config.require_ack,
+                }
+
+                # Add resource_id if provided
+                if resource_id is not None:
+                    request_data["resource_id"] = resource_id
+
+                # Send request to router with acknowledgment support
+                if config.require_ack:
+                    response = await self._request_with_ack(
+                        subject="ipc.route.request",
+                        data=request_data,
+                        message_id=message_id,
+                        timeout=timeout or self._timeout,
+                        ack_timeout=config.ack_timeout,
+                    )
+                else:
+                    # Standard request without acknowledgment
+                    response = await self._nats_client.request(
+                        "ipc.route.request",
+                        request_data,
+                        timeout=timeout or self._timeout,
+                    )
+
+                if response is None:
+                    raise TimeoutError(f"Service call to '{service_name}.{method}' timed out")
+
+                # Check if routing was successful
+                if not response.get("success", False):
+                    error = response.get("error", {})
+                    error_type = error.get("type", "UnknownError")
+                    error_msg = error.get("message", f"Call to '{service_name}.{method}' failed")
+                    error_code = error.get("code", 500)
+
+                    # Create appropriate exception based on error code
+                    if error_code == 404:
+                        # Check if this is a resource-not-found error
+                        if resource_id and "resource" in error_msg.lower():
+                            raise ResourceNotFoundError(error_msg, resource_id=resource_id)
+                        else:
+                            raise ValueError(f"Service '{service_name}' not found")
+                    elif error_code == 503:
+                        raise RuntimeError(f"Service '{service_name}' unavailable: {error_msg}")
+                    elif error_code == 504:
+                        raise TimeoutError(f"Service '{service_name}' timeout: {error_msg}")
+                    else:
+                        raise Exception(f"{error_type}: {error_msg}")
+
+                # Return the result
+                return response.get("result")
+
+            except (TimeoutError, AcknowledgmentTimeoutError) as e:
+                last_error = e
+                if attempt < config.max_retries:
+                    # Wait before retry with exponential backoff
+                    await asyncio.sleep(current_delay)
+                    current_delay *= config.retry_multiplier
+                    continue
+                raise
+
+            except Exception:
+                # Don't retry on non-timeout errors
+                raise
+
+        # Should not reach here, but just in case
+        raise last_error or Exception("Service call failed after all retries")
+
+    async def _request_with_ack(
+        self,
+        subject: str,
+        data: dict[str, Any],
+        message_id: str,
+        timeout: float,
+        ack_timeout: float,
+    ) -> dict[str, Any] | None:
+        """Send request and wait for acknowledgment.
+
+        Args:
+            subject: NATS subject
+            data: Request data
+            message_id: Unique message identifier
+            timeout: Request timeout
+            ack_timeout: Acknowledgment timeout
+
+        Returns:
+            Response data or None
+
+        Raises:
+            AcknowledgmentTimeoutError: If acknowledgment not received
+        """
+        # Create acknowledgment subject for this message
+        ack_subject = f"ipc.ack.{message_id}"
+        ack_received = asyncio.Event()
+        ack_error: Exception | None = None
+
+        async def ack_handler(msg: Any) -> None:
+            """Handle acknowledgment messages."""
+            nonlocal ack_error
+            try:
+                ack_data = msgpack.unpackb(msg.data, raw=False)
+                if ack_data.get("status") == "success":
+                    # Success acknowledgment
+                    pass
+                else:
+                    error_msg = ack_data.get("error_message", "Unknown error")
+                    ack_error = Exception(f"Acknowledgment failed: {error_msg}")
+            finally:
+                ack_received.set()
+
+        # Subscribe to acknowledgment subject temporarily
+        if not self._nats_client._nc:
+            raise RuntimeError("Not connected to NATS")
+
+        subscription = await self._nats_client._nc.subscribe(ack_subject, cb=ack_handler)
+
+        try:
+            # Send the request
+            response = await self._nats_client.request(subject, data, timeout=timeout)
+
+            # Wait for acknowledgment
+            try:
+                await asyncio.wait_for(ack_received.wait(), timeout=ack_timeout)
+                if ack_error:
+                    raise ack_error
+            except TimeoutError as e:
+                raise AcknowledgmentTimeoutError(
+                    f"Acknowledgment timeout for message {message_id}",
+                    message_id=message_id,
+                    timeout=ack_timeout,
+                    service_name=data.get("service_name"),
+                ) from e
+
+            return response
+
+        finally:
+            # Clean up subscription
+            await subscription.unsubscribe()
+
+    async def send_acknowledgment(
+        self,
+        message_id: str,
+        service_name: str,
+        status: str,
+        error_message: str | None = None,
+        processing_time_ms: float | None = None,
+    ) -> None:
+        """Send acknowledgment for a received message.
+
+        This method is used by service implementations to acknowledge
+        successful or failed message processing.
+
+        Args:
+            message_id: The message ID to acknowledge
+            service_name: Name of the acknowledging service
+            status: Status ("success" or "failure")
+            error_message: Optional error message for failures
+            processing_time_ms: Optional processing time in milliseconds
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Create acknowledgment data
+        ack_data = {
+            "message_id": message_id,
+            "service_name": service_name,
+            "instance_id": self._instance_id,
+            "status": status,
+            "error_message": error_message,
+            "processing_time_ms": processing_time_ms or 0.0,
+            "trace_id": f"ack_{uuid.uuid4().hex[:16]}",
+        }
+
+        # Publish acknowledgment
+        ack_subject = f"ipc.ack.{message_id}"
+        await self._nats_client.publish(ack_subject, ack_data)
+
+    async def query_message_status(
+        self,
+        message_id: str,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Query the status of a message.
+
+        Args:
+            message_id: The message ID to query
+            timeout: Request timeout
+
+        Returns:
+            Message status information
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If request times out
+        """
+        if not self.is_connected:
+            raise RuntimeError("Not connected to NATS")
+
+        # Create status query request
+        request_data = {
+            "message_id": message_id,
+            "trace_id": f"status_{uuid.uuid4().hex[:16]}",
+        }
+
+        # Send request
+        response = await self._nats_client.request(
+            "ipc.message.status",
+            request_data,
+            timeout=timeout or self._timeout,
+        )
+
+        if response is None:
+            raise TimeoutError(f"Message status query timed out for {message_id}")
+
+        return response
 
     async def register_resource(
         self,

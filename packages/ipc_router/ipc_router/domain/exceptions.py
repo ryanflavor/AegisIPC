@@ -356,3 +356,132 @@ class ResourceError(DomainError):
     """Base class for resource-related errors."""
 
     pass
+
+
+# Message-related exceptions for exactly-once delivery
+class DuplicateMessageError(DomainError):
+    """Raised when a duplicate message is detected.
+
+    Used for idempotent processing to indicate that a message with the
+    same ID has already been processed.
+    """
+
+    def __init__(self, message_id: str, cached_response: Any | None = None, **kwargs: Any) -> None:
+        """
+        Initialize duplicate message error.
+
+        Args:
+            message_id: ID of the duplicate message
+            cached_response: Cached response from original processing
+            **kwargs: Additional error details
+        """
+        message = f"Message '{message_id}' has already been processed"
+        details = {
+            "message_id": message_id,
+            "has_cached_response": cached_response is not None,
+            **kwargs.pop("details", {}),
+        }
+        super().__init__(message, error_code="DUPLICATE_MESSAGE", details=details)
+        self.message_id = message_id
+        self.cached_response = cached_response
+
+
+class MessageExpiredError(DomainError):
+    """Raised when a message has exceeded its TTL.
+
+    Indicates that a message has passed its acknowledgment deadline and
+    is no longer valid for processing.
+    """
+
+    def __init__(self, message_id: str, expired_at: str, created_at: str, **kwargs: Any) -> None:
+        """
+        Initialize message expired error.
+
+        Args:
+            message_id: ID of the expired message
+            expired_at: Expiration timestamp
+            created_at: Creation timestamp
+            **kwargs: Additional error details
+        """
+        message = f"Message '{message_id}' has expired"
+        details = {
+            "message_id": message_id,
+            "expired_at": expired_at,
+            "created_at": created_at,
+            **kwargs.pop("details", {}),
+        }
+        super().__init__(message, error_code="MESSAGE_EXPIRED", details=details)
+
+
+class AcknowledgmentTimeoutError(ApplicationError):
+    """Raised when message acknowledgment times out.
+
+    Triggers message retry according to the retry policy.
+    """
+
+    def __init__(
+        self,
+        message_id: str,
+        service_name: str,
+        timeout_seconds: float,
+        retry_count: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Initialize acknowledgment timeout error.
+
+        Args:
+            message_id: ID of the message that timed out
+            service_name: Target service name
+            timeout_seconds: Timeout duration in seconds
+            retry_count: Current retry attempt number
+            **kwargs: Additional error details
+        """
+        message = (
+            f"Acknowledgment timeout for message '{message_id}' to service '{service_name}' "
+            f"after {timeout_seconds} seconds"
+        )
+        details = {
+            "message_id": message_id,
+            "service_name": service_name,
+            "timeout_seconds": timeout_seconds,
+            "retry_count": retry_count,
+            **kwargs.pop("details", {}),
+        }
+        super().__init__(message, error_code="ACKNOWLEDGMENT_TIMEOUT", details=details)
+
+
+class MessageStorageError(InfrastructureError):
+    """Raised when message persistence fails.
+
+    May cause degradation to at-most-once delivery if messages cannot be stored.
+    """
+
+    def __init__(
+        self,
+        operation: str,
+        message_id: str | None = None,
+        reason: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Initialize message storage error.
+
+        Args:
+            operation: Storage operation that failed (store, retrieve, update, delete)
+            message_id: ID of the affected message, if applicable
+            reason: Failure reason
+            **kwargs: Additional error details
+        """
+        message = f"Message storage operation '{operation}' failed"
+        if message_id:
+            message += f" for message '{message_id}'"
+        if reason:
+            message += f": {reason}"
+        details = {
+            "operation": operation,
+            "message_id": message_id,
+            "reason": reason,
+            **kwargs.pop("details", {}),
+        }
+        super().__init__(message, error_code="MESSAGE_STORAGE_ERROR", details=details)

@@ -22,7 +22,9 @@ class TestRoutingService:
         from ipc_router.domain.interfaces.load_balancer import LoadBalancer
 
         self.mock_load_balancer = Mock(spec=LoadBalancer)
-        self.routing_service = RoutingService(self.mock_registry, self.mock_load_balancer)
+        self.routing_service = RoutingService(
+            self.mock_registry, load_balancer=self.mock_load_balancer
+        )
 
     async def test_initialization_with_default_load_balancer(self) -> None:
         """Test initialization with default load balancer."""

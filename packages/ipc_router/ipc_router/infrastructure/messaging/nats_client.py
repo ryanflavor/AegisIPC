@@ -11,8 +11,12 @@ import msgpack
 import nats
 from nats.aio.client import Client as NATSConnection
 from nats.aio.msg import Msg
+from nats.js import JetStreamContext
+from nats.js.api import RetentionPolicy, StreamConfig
 
-from ipc_router.domain.exceptions import ConnectionError as IPCConnectionError
+from ipc_router.domain.exceptions import (
+    ConnectionError as IPCConnectionError,
+)
 from ipc_router.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
@@ -45,6 +49,7 @@ class NATSClient:
         self.reconnect_time_wait = reconnect_time_wait
         self.max_reconnect_attempts = max_reconnect_attempts
         self._nc: NATSConnection | None = None
+        self._js: JetStreamContext | None = None
         self._subscriptions: dict[str, asyncio.Task[None]] = {}
         self._connected = False
 
@@ -73,6 +78,9 @@ class NATSClient:
                     "client_name": self.name,
                 },
             )
+
+            # Initialize JetStream
+            await self._initialize_jetstream()
         except Exception as e:
             logger.error(
                 "Failed to connect to NATS server",
@@ -102,6 +110,7 @@ class NATSClient:
         # Close connection
         await self._nc.close()
         self._connected = False
+        self._js = None
         logger.info("Disconnected from NATS server")
 
     async def publish(
@@ -226,6 +235,119 @@ class NATSClient:
             )
             raise
 
+    async def request_with_ack(
+        self,
+        subject: str,
+        data: Any,
+        message_id: str,
+        timeout: float = 30.0,
+        ack_timeout: float = 30.0,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """Send a request and wait for acknowledgment.
+
+        This method sends a request and waits for both the response and an acknowledgment.
+        It's designed for reliable message delivery where the receiver must confirm
+        successful processing.
+
+        Args:
+            subject: Subject to send request to
+            data: Request data (will be serialized with MessagePack)
+            message_id: Unique message identifier for tracking
+            timeout: Initial request timeout in seconds
+            ack_timeout: Acknowledgment wait timeout in seconds
+            headers: Optional headers
+
+        Returns:
+            Deserialized response data
+
+        Raises:
+            asyncio.TimeoutError: If request times out
+            AcknowledgmentTimeoutError: If acknowledgment not received within timeout
+        """
+        if not self._connected or not self._nc:
+            raise IPCConnectionError(
+                service="NATS",
+                endpoint=str(self.servers),
+                reason="Not connected",
+            )
+
+        # Add message_id to headers for tracking
+        if headers is None:
+            headers = {}
+        headers["X-Message-ID"] = message_id
+        headers["X-Requires-Ack"] = "true"
+
+        # Create acknowledgment subject for this message
+        ack_subject = f"ipc.ack.{message_id}"
+        ack_received = asyncio.Event()
+        ack_error: Exception | None = None
+
+        async def ack_handler(ack_data: Any, _reply: str | None) -> None:
+            """Handle acknowledgment messages."""
+            nonlocal ack_error
+            try:
+                if ack_data.get("status") == "success":
+                    logger.debug(
+                        "Received acknowledgment",
+                        extra={
+                            "message_id": message_id,
+                            "processing_time_ms": ack_data.get("processing_time_ms"),
+                        },
+                    )
+                else:
+                    error_msg = ack_data.get("error_message", "Unknown error")
+                    ack_error = Exception(f"Acknowledgment failed: {error_msg}")
+                    logger.error(
+                        "Received failure acknowledgment",
+                        extra={
+                            "message_id": message_id,
+                            "error": error_msg,
+                        },
+                    )
+            finally:
+                ack_received.set()
+
+        # Subscribe to acknowledgment subject temporarily
+        await self.subscribe(ack_subject, ack_handler)
+
+        try:
+            # Send the request
+            response_data = await self.request(
+                subject=subject,
+                data=data,
+                timeout=timeout,
+                headers=headers,
+            )
+
+            # Wait for acknowledgment
+            try:
+                await asyncio.wait_for(ack_received.wait(), timeout=ack_timeout)
+                if ack_error:
+                    raise ack_error
+            except TimeoutError as e:
+                from ipc_router.domain.exceptions import AcknowledgmentTimeoutError
+
+                logger.error(
+                    "Acknowledgment timeout",
+                    extra={
+                        "message_id": message_id,
+                        "subject": subject,
+                        "timeout": ack_timeout,
+                    },
+                )
+                raise AcknowledgmentTimeoutError(
+                    message_id=message_id,
+                    timeout=ack_timeout,
+                    service_name=subject,
+                ) from e
+
+            return response_data
+
+        finally:
+            # Clean up acknowledgment subscription
+            await self.unsubscribe(ack_subject)
+
     async def subscribe(
         self,
         subject: str,
@@ -341,7 +463,119 @@ class NATSClient:
         self._connected = False
         logger.info("NATS connection closed")
 
+    async def _initialize_jetstream(self) -> None:
+        """Initialize JetStream context and create necessary streams."""
+        if not self._nc:
+            return
+
+        try:
+            # Create JetStream context
+            self._js = self._nc.jetstream()
+
+            # Create stream for reliable message delivery
+            stream_name = "IPC_MESSAGES"
+            stream_config = StreamConfig(
+                name=stream_name,
+                subjects=["ipc.messages.*", "ipc.ack.*"],
+                retention=RetentionPolicy.WORK_QUEUE,
+                max_age=3600,  # 1 hour retention
+                max_msgs=100000,
+                duplicate_window=300,  # 5 minute duplicate window
+                description="Stream for IPC reliable message delivery",
+            )
+
+            try:
+                # Try to create the stream
+                await self._js.add_stream(stream_config)
+                logger.info(
+                    "Created JetStream stream",
+                    extra={"stream_name": stream_name},
+                )
+            except Exception:
+                # Stream might already exist, try to update it
+                try:
+                    await self._js.update_stream(stream_config)
+                    logger.info(
+                        "Updated JetStream stream",
+                        extra={"stream_name": stream_name},
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to create/update stream",
+                        exc_info=e,
+                        extra={"stream_name": stream_name},
+                    )
+
+        except Exception as e:
+            logger.error(
+                "Failed to initialize JetStream",
+                exc_info=e,
+            )
+            # JetStream is optional, so we don't raise
+
+    async def publish_with_jetstream(
+        self,
+        subject: str,
+        data: Any,
+        message_id: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        """Publish a message using JetStream for persistence.
+
+        Args:
+            subject: Subject to publish to
+            data: Data to publish (will be serialized with MessagePack)
+            message_id: Unique message identifier
+            headers: Optional headers
+        """
+        if not self._js:
+            # Fallback to regular publish if JetStream not available
+            await self.publish(subject, data, headers=headers)
+            return
+
+        try:
+            # Serialize data with MessagePack
+            payload = msgpack.packb(data, use_bin_type=True)
+
+            # Add message ID to headers for deduplication
+            if headers is None:
+                headers = {}
+            headers["Nats-Msg-Id"] = message_id
+
+            # Publish via JetStream
+            ack = await self._js.publish(
+                subject=subject,
+                payload=payload,
+                headers=headers,
+            )
+
+            logger.debug(
+                "Published message via JetStream",
+                extra={
+                    "subject": subject,
+                    "message_id": message_id,
+                    "stream": ack.stream,
+                    "seq": ack.seq,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to publish via JetStream",
+                exc_info=e,
+                extra={
+                    "subject": subject,
+                    "message_id": message_id,
+                },
+            )
+            raise
+
     @property
     def is_connected(self) -> bool:
         """Check if client is connected."""
         return self._connected
+
+    @property
+    def has_jetstream(self) -> bool:
+        """Check if JetStream is available."""
+        return self._js is not None

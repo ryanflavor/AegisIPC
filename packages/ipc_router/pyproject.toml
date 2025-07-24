@@ -13,6 +13,7 @@ dependencies = [
     "asyncio==3.4.3",
     "uvloop==0.21.0",
     "fastapi==0.115.6",
+    "prometheus-client==0.21.0",
     "ipc-client-sdk",
 ]
 

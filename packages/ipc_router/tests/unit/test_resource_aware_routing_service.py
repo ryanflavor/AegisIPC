@@ -23,6 +23,7 @@ class TestResourceAwareRoutingService:
         """Create a mock ResourceRegistry."""
         mock = MagicMock(spec=ResourceRegistry)
         mock.get_service = AsyncMock()
+        mock.get_healthy_instances = AsyncMock()
         mock.get_resource_owner = AsyncMock()
         mock.release_resource = AsyncMock()
         mock.list_services = AsyncMock()
@@ -107,13 +108,25 @@ class TestResourceAwareRoutingService:
         # Setup mocks
         mock_resource_registry.get_service.return_value = service_info
 
+        # Create mock service instances to return from get_healthy_instances
+        healthy_instances = [
+            ServiceInstance(
+                service_name="test-service",
+                instance_id="instance-1",
+                registered_at="2025-01-01T00:00:00Z",
+                status=ServiceStatus.ONLINE,
+            ),
+            ServiceInstance(
+                service_name="test-service",
+                instance_id="instance-2",
+                registered_at="2025-01-01T00:00:00Z",
+                status=ServiceStatus.ONLINE,
+            ),
+        ]
+        mock_resource_registry.get_healthy_instances.return_value = healthy_instances
+
         # Create a mock service instance to return from load balancer
-        selected_instance = ServiceInstance(
-            service_name="test-service",
-            instance_id="instance-1",
-            registered_at="2025-01-01T00:00:00Z",
-            status=ServiceStatus.ONLINE,
-        )
+        selected_instance = healthy_instances[0]
         mock_load_balancer.select_instance.return_value = selected_instance
 
         # Route request
