@@ -15,6 +15,17 @@ from ipc_router.infrastructure.logging import get_logger
 
 F = TypeVar("F", bound=Callable[..., Any])
 
+# Import metrics for instance-level tracking (Story 2.1)
+try:
+    from ipc_router.infrastructure.monitoring.metrics import (
+        instance_routing_duration,
+        instance_routing_failures_total,
+    )
+except ImportError:
+    # Fallback for testing without metrics
+    instance_routing_duration = None
+    instance_routing_failures_total = None
+
 if TYPE_CHECKING:
     from ipc_router.application.services.routing_service import RoutingService
     from ipc_router.domain.interfaces.message_store import MessageStore
@@ -278,6 +289,14 @@ class RouteRequestHandler:
                             duration_ms=(time.time() - forward_start) * 1000,
                         )
 
+                        # Record success metric
+                        if instance_routing_duration:
+                            instance_routing_duration.labels(
+                                service_name=request.service_name,
+                                instance_id=instance_id,
+                                success="true",
+                            ).observe(time.time() - forward_start)
+
                         await self._send_response(reply_to, response)
 
                     except TimeoutError as e:
@@ -313,6 +332,24 @@ class RouteRequestHandler:
                 },
             )
 
+            # Determine error code
+            error_code = 504 if isinstance(e, ServiceUnavailableError) else 500
+
+            # Record failure metric
+            if instance_routing_failures_total:
+                instance_routing_failures_total.labels(
+                    service_name=request.service_name,
+                    instance_id=instance_id,
+                    error_code=str(error_code),
+                ).inc()
+
+            if instance_routing_duration:
+                instance_routing_duration.labels(
+                    service_name=request.service_name,
+                    instance_id=instance_id,
+                    success="false",
+                ).observe(time.time() - forward_start)
+
             # Send error response
             error_response = RouteResponse(
                 success=False,
@@ -323,7 +360,7 @@ class RouteRequestHandler:
                         else type(e).__name__
                     ),
                     "message": str(e),
-                    "code": 504 if isinstance(e, ServiceUnavailableError) else 500,
+                    "code": error_code,
                 },
                 instance_id=instance_id,
                 trace_id=request.trace_id,

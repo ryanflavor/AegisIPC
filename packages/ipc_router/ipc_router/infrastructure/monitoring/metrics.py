@@ -66,6 +66,20 @@ message_delivery_failures_total = Counter(
     ["service_name", "method", "failure_type"],
 )
 
+# Instance-level failure metrics
+instance_routing_failures_total = Counter(
+    "ipc_instance_routing_failures_total",
+    "Total number of instance-level routing failures",
+    ["service_name", "instance_id", "error_code"],
+)
+
+instance_routing_duration = Histogram(
+    "ipc_instance_routing_duration_seconds",
+    "Duration of routing to specific instances",
+    ["service_name", "instance_id", "success"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+)
+
 # Cache metrics
 message_cache_hit_ratio = Gauge(
     "ipc_message_cache_hit_ratio",

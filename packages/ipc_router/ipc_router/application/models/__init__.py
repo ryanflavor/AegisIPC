@@ -30,7 +30,7 @@ from .resource_models import (
     ResourceTransferRequest,
     ResourceTransferResponse,
 )
-from .routing_models import RouteRequest, RouteResponse
+from .routing_models import HeartbeatRequest, HeartbeatResponse, RouteRequest, RouteResponse
 
 __all__ = [
     "AcknowledgmentRequest",
@@ -41,6 +41,8 @@ __all__ = [
     "BulkResourceRegistrationResponse",
     "BulkResourceReleaseRequest",
     "BulkResourceReleaseResponse",
+    "HeartbeatRequest",
+    "HeartbeatResponse",
     "MessageDeliveryConfig",
     "MessageStatusRequest",
     "MessageStatusResponse",

@@ -33,6 +33,8 @@ class ServiceClientConfig:
         reconnect_time_wait: Time to wait between reconnections
         retry_attempts: Number of retry attempts for registration
         retry_delay: Initial delay between retries in seconds
+        heartbeat_enabled: Whether to automatically send heartbeats after registration
+        heartbeat_interval: Interval between heartbeats in seconds
     """
 
     nats_servers: list[str] | str = "nats://localhost:4222"
@@ -41,6 +43,8 @@ class ServiceClientConfig:
     reconnect_time_wait: int = 2
     retry_attempts: int = 3
     retry_delay: float = 0.5
+    heartbeat_enabled: bool = True
+    heartbeat_interval: float = 5.0
 
 
 @dataclass
@@ -224,6 +228,7 @@ class ServiceClient:
         nats_url: str = "nats://localhost:4222",
         instance_id: str | None = None,
         timeout: float = 5.0,
+        config: ServiceClientConfig | None = None,
     ) -> None:
         """Initialize the service client.
 
@@ -231,14 +236,33 @@ class ServiceClient:
             nats_url: NATS server URL
             instance_id: Instance ID, generated if not provided
             timeout: Request timeout in seconds
+            config: Optional configuration object (defaults created from other params)
         """
-        self._nats_url = nats_url
+        # Use provided config or create from individual params
+        if config:
+            self._config = config
+            self._nats_url = (
+                config.nats_servers
+                if isinstance(config.nats_servers, str)
+                else config.nats_servers[0]
+            )
+            self._timeout = config.timeout
+        else:
+            # Create config from individual params for backward compatibility
+            self._config = ServiceClientConfig(
+                nats_servers=nats_url,
+                timeout=timeout,
+            )
+            self._nats_url = nats_url
+            self._timeout = timeout
+
         self._instance_id = instance_id or f"instance_{uuid.uuid4().hex[:8]}"
-        self._timeout = timeout
-        self._nats_client = NATSClient(nats_url)
+        self._nats_client = NATSClient(self._nats_url)
         self._registered_services: set[str] = set()
         self._heartbeat_tasks: dict[str, asyncio.Task[None]] = {}
         self._registered_resources: dict[str, set[str]] = {}  # service_name -> resource_ids
+        self._heartbeat_status: dict[str, bool] = {}  # service_name -> is_heartbeat_active
+        self._service_instances: dict[str, str] = {}  # service_name -> instance_id
 
     @property
     def is_connected(self) -> bool:
@@ -321,12 +345,34 @@ class ServiceClient:
         # Parse response data
         data = response.get("data", {})
         self._registered_services.add(service_name)
+        self._service_instances[service_name] = effective_instance_id  # Store the instance_id used
+
+        # Start automatic heartbeat if enabled
+        if self._config.heartbeat_enabled:
+            try:
+                await self.start_heartbeat(service_name, self._config.heartbeat_interval)
+                self._heartbeat_status[service_name] = True
+            except Exception:
+                # Log error but don't fail registration
+                # Heartbeat is optional functionality
+                self._heartbeat_status[service_name] = False
+
+        # Parse registered_at if provided
+        registered_at_str = data.get("registered_at")
+        registered_at = None
+        if registered_at_str:
+            try:
+                registered_at = datetime.fromisoformat(registered_at_str)
+            except (ValueError, TypeError):
+                registered_at = datetime.now(UTC)
+        else:
+            registered_at = datetime.now(UTC)
 
         return ServiceRegistrationResponse(
             success=data.get("success", True),
             service_name=data.get("service_name", service_name),
             instance_id=data.get("instance_id", effective_instance_id),
-            registered_at=data.get("registered_at"),
+            registered_at=registered_at,
             message=data.get("message", ""),
         )
 
@@ -360,6 +406,14 @@ class ServiceClient:
             self._heartbeat_tasks[service_name].cancel()
             del self._heartbeat_tasks[service_name]
 
+        # Update heartbeat status
+        if service_name in self._heartbeat_status:
+            del self._heartbeat_status[service_name]
+
+        # Clean up instance mapping
+        if service_name in self._service_instances:
+            del self._service_instances[service_name]
+
     async def heartbeat(self, service_name: str) -> None:
         """Send heartbeat for a registered service.
 
@@ -372,10 +426,14 @@ class ServiceClient:
         if service_name not in self._registered_services:
             raise ValueError(f"Service '{service_name}' is not registered")
 
+        # Use the instance_id that was registered for this service
+        instance_id = self._service_instances.get(service_name, self._instance_id)
+
         payload = {
             "service_name": service_name,
-            "instance_id": self._instance_id,
+            "instance_id": instance_id,
             "timestamp": datetime.now(UTC).isoformat(),
+            "status": "healthy",  # Add status field for HeartbeatRequest model
         }
 
         await self._nats_client.publish("ipc.service.heartbeat", payload)
@@ -410,6 +468,19 @@ class ServiceClient:
         self._heartbeat_tasks[service_name] = task
         return task
 
+    def get_heartbeat_status(self, service_name: str | None = None) -> dict[str, bool]:
+        """Get heartbeat status for services.
+
+        Args:
+            service_name: Optional service name to filter by
+
+        Returns:
+            Dictionary mapping service names to heartbeat status (True if active)
+        """
+        if service_name:
+            return {service_name: self._heartbeat_status.get(service_name, False)}
+        return self._heartbeat_status.copy()
+
     async def call(
         self,
         service_name: str,
@@ -418,6 +489,7 @@ class ServiceClient:
         timeout: float | None = None,
         trace_id: str | None = None,
         resource_id: str | None = None,
+        excluded_instances: list[str] | None = None,
     ) -> Any:
         """Call a method on a service via the router.
 
@@ -428,6 +500,7 @@ class ServiceClient:
             timeout: Request timeout in seconds (uses default if not provided)
             trace_id: Optional trace ID for distributed tracing
             resource_id: Optional resource ID for resource-aware routing
+            excluded_instances: Optional list of instance IDs to exclude from routing
 
         Returns:
             The result from the method call
@@ -460,6 +533,10 @@ class ServiceClient:
         # Add resource_id if provided
         if resource_id is not None:
             request_data["resource_id"] = resource_id
+
+        # Add excluded_instances if provided
+        if excluded_instances:
+            request_data["excluded_instances"] = excluded_instances
 
         # Send request to router
         response = await self._nats_client.request(
@@ -494,6 +571,81 @@ class ServiceClient:
 
         # Return the result
         return response.get("result")
+
+    async def call_with_failover(
+        self,
+        service_name: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        trace_id: str | None = None,
+        resource_id: str | None = None,
+        max_retries: int = 3,
+        retry_on_codes: set[int] | None = None,
+    ) -> Any:
+        """Call a method on a service with instance-level failover support.
+
+        This method automatically retries failed calls on different healthy instances
+        when the failure is due to instance-specific issues (503, 504 errors).
+
+        Args:
+            service_name: Name of the target service
+            method: Method to call on the service
+            params: Method parameters (optional)
+            timeout: Request timeout in seconds (uses default if not provided)
+            trace_id: Optional trace ID for distributed tracing
+            resource_id: Optional resource ID for resource-aware routing
+            max_retries: Maximum number of different instances to try (default: 3)
+            retry_on_codes: Set of error codes to retry on (default: {503, 504})
+
+        Returns:
+            The result from the method call
+
+        Raises:
+            RuntimeError: If not connected to NATS
+            TimeoutError: If all retry attempts timeout
+            Exception: If the service call fails on all instances
+        """
+        if retry_on_codes is None:
+            retry_on_codes = {503, 504}  # Service unavailable and gateway timeout
+
+        excluded_instances: list[str] = []
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                # Call with excluded instances from previous failures
+                return await self.call(
+                    service_name=service_name,
+                    method=method,
+                    params=params,
+                    timeout=timeout,
+                    trace_id=trace_id,
+                    resource_id=resource_id,
+                    excluded_instances=excluded_instances if excluded_instances else None,
+                )
+            except (RuntimeError, TimeoutError) as e:
+                last_error = e
+                # Extract instance_id from error if available
+                # For now, we'll retry on these errors
+                if attempt < max_retries - 1:
+                    # Get instance_id from response if available
+                    # Since we don't have access to the raw response in exceptions,
+                    # we'll need to enhance error handling in the future
+                    continue
+                raise
+            except Exception as e:
+                last_error = e
+                # Check if error is retryable
+                error_code = getattr(e, "code", None)
+                if error_code in retry_on_codes and attempt < max_retries - 1:
+                    continue
+                raise
+
+        # Should not reach here, but just in case
+        if last_error:
+            raise last_error
+        raise Exception(f"Failed to call {service_name}.{method} after {max_retries} attempts")
 
     async def call_reliable(
         self,

@@ -119,12 +119,30 @@ class RoutingService:
             # Get healthy instances for the service
             instances = await self._registry.get_healthy_instances(request.service_name)
 
+            # Filter out excluded instances if provided
+            if request.excluded_instances:
+                instances = [
+                    inst for inst in instances if inst.instance_id not in request.excluded_instances
+                ]
+
+                logger.debug(
+                    "Filtered excluded instances",
+                    extra={
+                        "service_name": request.service_name,
+                        "total_instances": len(instances) + len(request.excluded_instances),
+                        "excluded_count": len(request.excluded_instances),
+                        "available_instances": len(instances),
+                        "trace_id": request.trace_id,
+                    },
+                )
+
             if not instances:
                 logger.warning(
                     "No healthy instances available for routing",
                     extra={
                         "service_name": request.service_name,
                         "trace_id": request.trace_id,
+                        "excluded_instances": request.excluded_instances or [],
                     },
                 )
                 raise ServiceUnavailableError(
