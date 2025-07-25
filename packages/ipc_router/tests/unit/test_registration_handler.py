@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from ipc_client_sdk.models import ServiceRegistrationResponse
+from ipc_router.domain.exceptions import ConflictError
 from ipc_router.infrastructure.messaging.handlers.registration_handler import (
     RegistrationHandler,
 )
@@ -222,3 +223,110 @@ class TestRegistrationHandler:
                 },
             },
         )
+
+    @pytest.mark.asyncio
+    async def test_handle_registration_with_role(
+        self,
+        registration_handler: RegistrationHandler,
+        mock_service_registry: AsyncMock,
+        mock_nats_client: AsyncMock,
+    ) -> None:
+        """Test registration with role specified."""
+        # Mock registration response with role
+        mock_response = ServiceRegistrationResponse(
+            success=True,
+            service_name="test-service",
+            instance_id="instance-1",
+            role="ACTIVE",
+            registered_at=datetime.now(UTC),
+            message="Service registered successfully as ACTIVE",
+        )
+        mock_service_registry.register_service.return_value = mock_response
+
+        # Test data with role
+        test_data = {
+            "service_name": "test-service",
+            "instance_id": "instance-1",
+            "role": "active",
+            "metadata": {"resource_id": "res_123"},
+        }
+
+        await registration_handler._handle_registration(test_data, "test-reply")
+
+        # Verify service registry was called
+        mock_service_registry.register_service.assert_called_once()
+        called_request = mock_service_registry.register_service.call_args[0][0]
+        assert called_request.role == "active"
+
+        # Verify response includes role
+        mock_nats_client.publish.assert_called_once()
+        response_data = mock_nats_client.publish.call_args[1]["data"]
+        assert response_data["role"] == "ACTIVE"
+        assert response_data["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_handle_registration_default_role(
+        self,
+        registration_handler: RegistrationHandler,
+        mock_service_registry: AsyncMock,
+        mock_nats_client: AsyncMock,
+    ) -> None:
+        """Test registration defaults to STANDBY role when not specified."""
+        # Mock registration response with default role
+        mock_response = ServiceRegistrationResponse(
+            success=True,
+            service_name="test-service",
+            instance_id="instance-1",
+            role="STANDBY",
+            registered_at=datetime.now(UTC),
+            message="Service registered successfully as STANDBY",
+        )
+        mock_service_registry.register_service.return_value = mock_response
+
+        # Test data without role
+        test_data = {
+            "service_name": "test-service",
+            "instance_id": "instance-1",
+            "metadata": {},
+        }
+
+        await registration_handler._handle_registration(test_data, "test-reply")
+
+        # Verify service registry was called
+        mock_service_registry.register_service.assert_called_once()
+        called_request = mock_service_registry.register_service.call_args[0][0]
+        assert called_request.role == "standby"  # Should default to standby
+
+        # Verify response includes default role
+        mock_nats_client.publish.assert_called_once()
+        response_data = mock_nats_client.publish.call_args[1]["data"]
+        assert response_data["role"] == "STANDBY"
+
+    @pytest.mark.asyncio
+    async def test_handle_registration_role_conflict(
+        self,
+        registration_handler: RegistrationHandler,
+        mock_service_registry: AsyncMock,
+        mock_nats_client: AsyncMock,
+    ) -> None:
+        """Test handling of role conflict errors."""
+        # Mock service registry to raise ConflictError
+        mock_service_registry.register_service.side_effect = ConflictError(
+            "Resource res_123 already has an active instance: service1/instance1"
+        )
+
+        test_data = {
+            "service_name": "test-service",
+            "instance_id": "instance-2",
+            "role": "active",
+            "metadata": {"resource_id": "res_123"},
+        }
+
+        await registration_handler._handle_registration(test_data, "test-reply")
+
+        # Verify error response was sent
+        mock_nats_client.publish.assert_called_once()
+        response_data = mock_nats_client.publish.call_args[1]["data"]
+        assert response_data["success"] is False
+        assert response_data["error"]["code"] == "ROLE_CONFLICT"
+        assert "already has an active instance" in response_data["error"]["message"]

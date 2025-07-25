@@ -384,3 +384,118 @@ class TestServicesAPI:
         data = response.json()
         assert data["name"] == "test-service.v2"
         mock_service_registry.get_service.assert_called_once_with("test-service.v2")
+
+    def test_get_service_roles(
+        self,
+        test_client: TestClient,
+        mock_service_registry: AsyncMock,
+    ) -> None:
+        """Test getting service role information."""
+        # Setup mock data with mixed roles
+        now = datetime.now(UTC)
+        service_info = ServiceInfo(
+            name="test-service",
+            instances=[
+                ServiceInstanceInfo(
+                    instance_id="instance-1",
+                    status="ONLINE",
+                    role="ACTIVE",
+                    registered_at=now,
+                    last_heartbeat=now,
+                ),
+                ServiceInstanceInfo(
+                    instance_id="instance-2",
+                    status="ONLINE",
+                    role="STANDBY",
+                    registered_at=now,
+                    last_heartbeat=now,
+                ),
+                ServiceInstanceInfo(
+                    instance_id="instance-3",
+                    status="ONLINE",
+                    role="STANDBY",
+                    registered_at=now,
+                    last_heartbeat=now,
+                ),
+                ServiceInstanceInfo(
+                    instance_id="instance-4",
+                    status="ONLINE",
+                    role=None,  # Should default to standby
+                    registered_at=now,
+                    last_heartbeat=now,
+                ),
+            ],
+            created_at=now,
+            metadata={},
+        )
+
+        mock_service_registry.get_service.return_value = service_info
+
+        # Make request
+        response = test_client.get("/api/v1/admin/services/test-service/roles")
+
+        # Verify
+        assert response.status_code == 200
+        data = response.json()
+        assert data["service_name"] == "test-service"
+        assert "roles" in data
+
+        roles = data["roles"]
+        assert roles["service_name"] == "test-service"
+        assert len(roles["active_instances"]) == 1
+        assert "instance-1" in roles["active_instances"]
+        assert len(roles["standby_instances"]) == 3
+        assert "instance-2" in roles["standby_instances"]
+        assert "instance-3" in roles["standby_instances"]
+        assert "instance-4" in roles["standby_instances"]  # None defaults to standby
+
+        mock_service_registry.get_service.assert_called_once_with("test-service")
+
+    def test_get_service_roles_not_found(
+        self,
+        test_client: TestClient,
+        mock_service_registry: AsyncMock,
+    ) -> None:
+        """Test getting role information for non-existent service."""
+        # Setup mock to raise NotFoundError
+        mock_service_registry.get_service.side_effect = NotFoundError(
+            resource_type="Service",
+            resource_id="non-existent",
+        )
+
+        # Make request
+        response = test_client.get("/api/v1/admin/services/non-existent/roles")
+
+        # Verify
+        assert response.status_code == 404
+        data = response.json()
+        assert data["detail"] == "Service 'non-existent' not found"
+
+    def test_get_service_roles_empty_service(
+        self,
+        test_client: TestClient,
+        mock_service_registry: AsyncMock,
+    ) -> None:
+        """Test getting role information for service with no instances."""
+        # Setup mock data with no instances
+        now = datetime.now(UTC)
+        service_info = ServiceInfo(
+            name="empty-service",
+            instances=[],
+            created_at=now,
+            metadata={},
+        )
+
+        mock_service_registry.get_service.return_value = service_info
+
+        # Make request
+        response = test_client.get("/api/v1/admin/services/empty-service/roles")
+
+        # Verify
+        assert response.status_code == 200
+        data = response.json()
+        assert data["service_name"] == "empty-service"
+
+        roles = data["roles"]
+        assert len(roles["active_instances"]) == 0
+        assert len(roles["standby_instances"]) == 0

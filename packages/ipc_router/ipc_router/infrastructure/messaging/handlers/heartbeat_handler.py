@@ -31,8 +31,8 @@ try:
         ["service_name", "status"],
     )
 except ImportError:
-    heartbeats_received_total = None  # type: ignore[assignment]
-    heartbeat_processing_duration = None  # type: ignore[assignment]
+    heartbeats_received_total = None
+    heartbeat_processing_duration = None
 
 if TYPE_CHECKING:
     from ipc_router.application.services import ServiceRegistry

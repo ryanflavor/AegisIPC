@@ -10,7 +10,8 @@ from ipc_client_sdk.models import (
     ServiceRegistrationRequest,
 )
 from ipc_router.application.services import ServiceRegistry
-from ipc_router.domain.exceptions import DuplicateServiceInstanceError, NotFoundError
+from ipc_router.domain.enums import ServiceRole
+from ipc_router.domain.exceptions import ConflictError, DuplicateServiceInstanceError, NotFoundError
 
 
 @pytest.fixture
@@ -432,3 +433,219 @@ class TestServiceRegistry:
             # Test health check logging
             await service_registry.check_health()
             assert mock_logger.info.called
+
+    @pytest.mark.asyncio
+    async def test_register_service_with_role_default_standby(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test service registration defaults to STANDBY role."""
+        request = ServiceRegistrationRequest(
+            service_name="test-service",
+            instance_id="test_instance_01",
+        )
+        response = await service_registry.register_service(request)
+
+        assert response.success is True
+        assert response.role == "STANDBY"
+        assert "STANDBY" in response.message
+
+        # Verify instance was created with STANDBY role
+        service = service_registry._services["test-service"]
+        instance = service.get_instance("test_instance_01")
+        assert instance is not None
+        assert instance.role == ServiceRole.STANDBY
+
+    @pytest.mark.asyncio
+    async def test_register_service_with_active_role(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test service registration with ACTIVE role."""
+        # Create request with active role
+        request = ServiceRegistrationRequest(
+            service_name="test-service",
+            instance_id="active_instance",
+            metadata={"resource_id": "resource_123"},
+        )
+        request.role = "active"
+
+        response = await service_registry.register_service(request)
+
+        assert response.success is True
+        assert response.role == "ACTIVE"
+        assert "ACTIVE" in response.message
+
+        # Verify instance was created with ACTIVE role
+        service = service_registry._services["test-service"]
+        instance = service.get_instance("active_instance")
+        assert instance is not None
+        assert instance.role == ServiceRole.ACTIVE
+
+        # Verify resource tracking
+        active_info = await service_registry.get_active_instance_for_resource("resource_123")
+        assert active_info == ("test-service", "active_instance")
+
+    @pytest.mark.asyncio
+    async def test_register_service_active_role_conflict(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test that duplicate ACTIVE role registration raises ConflictError."""
+        # Register first active instance
+        request1 = ServiceRegistrationRequest(
+            service_name="service1",
+            instance_id="instance1",
+            metadata={"resource_id": "resource_123"},
+        )
+        request1.role = "active"
+        await service_registry.register_service(request1)
+
+        # Try to register another active instance for same resource
+        request2 = ServiceRegistrationRequest(
+            service_name="service2",
+            instance_id="instance2",
+            metadata={"resource_id": "resource_123"},
+        )
+        request2.role = "active"
+
+        with pytest.raises(ConflictError) as exc_info:
+            await service_registry.register_service(request2)
+
+        assert "resource_123" in str(exc_info.value)
+        assert "already has an active instance" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_multiple_standby_instances_allowed(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test that multiple STANDBY instances can be registered."""
+        # Register multiple standby instances
+        for i in range(3):
+            request = ServiceRegistrationRequest(
+                service_name="test-service",
+                instance_id=f"standby_{i}",
+                metadata={"resource_id": "resource_123"},
+            )
+            request.role = "standby"
+            response = await service_registry.register_service(request)
+            assert response.success is True
+
+        # Verify all instances exist
+        service = service_registry._services["test-service"]
+        assert service.instance_count == 3
+
+        # Get all standby instances
+        standby_instances = await service_registry.get_instances_by_role(
+            "test-service", ServiceRole.STANDBY
+        )
+        assert len(standby_instances) == 3
+
+    @pytest.mark.asyncio
+    async def test_get_instances_by_role(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test getting instances filtered by role."""
+        # Register mixed instances
+        requests = [
+            ("active_1", "active", {"resource_id": "res1"}),
+            ("standby_1", "standby", {}),
+            ("standby_2", "standby", {}),
+            ("active_2", "active", {"resource_id": "res2"}),
+        ]
+
+        for instance_id, role, metadata in requests:
+            request = ServiceRegistrationRequest(
+                service_name="test-service",
+                instance_id=instance_id,
+                metadata=metadata,
+            )
+            request.role = role
+            await service_registry.register_service(request)
+
+        # Get active instances
+        active_instances = await service_registry.get_instances_by_role(
+            "test-service", ServiceRole.ACTIVE
+        )
+        assert len(active_instances) == 2
+        assert all(inst.role == ServiceRole.ACTIVE for inst in active_instances)
+
+        # Get standby instances
+        standby_instances = await service_registry.get_instances_by_role(
+            "test-service", ServiceRole.STANDBY
+        )
+        assert len(standby_instances) == 2
+        assert all(inst.role == ServiceRole.STANDBY for inst in standby_instances)
+
+    @pytest.mark.asyncio
+    async def test_get_instances_by_role_service_not_found(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test getting instances by role for non-existent service."""
+        with pytest.raises(NotFoundError) as exc_info:
+            await service_registry.get_instances_by_role("non-existent", ServiceRole.ACTIVE)
+
+        assert "non-existent" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_unregister_active_instance_clears_resource_tracking(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test that unregistering an active instance clears resource tracking."""
+        # Register active instance
+        request = ServiceRegistrationRequest(
+            service_name="test-service",
+            instance_id="active_instance",
+            metadata={"resource_id": "resource_123"},
+        )
+        request.role = "active"
+        await service_registry.register_service(request)
+
+        # Verify resource tracking exists
+        active_info = await service_registry.get_active_instance_for_resource("resource_123")
+        assert active_info == ("test-service", "active_instance")
+
+        # Unregister the instance
+        await service_registry.unregister_instance("test-service", "active_instance")
+
+        # Verify resource tracking is cleared
+        active_info = await service_registry.get_active_instance_for_resource("resource_123")
+        assert active_info is None
+
+    @pytest.mark.asyncio
+    async def test_service_info_includes_role(
+        self,
+        service_registry: ServiceRegistry,
+    ) -> None:
+        """Test that service info includes role information."""
+        # Register instances with different roles
+        request1 = ServiceRegistrationRequest(
+            service_name="test-service",
+            instance_id="active_instance",
+        )
+        request1.role = "active"
+        await service_registry.register_service(request1)
+
+        request2 = ServiceRegistrationRequest(
+            service_name="test-service",
+            instance_id="standby_instance",
+        )
+        # Default role (standby)
+        await service_registry.register_service(request2)
+
+        # Get service info
+        service_info = await service_registry.get_service("test-service")
+
+        # Verify instances have role information
+        assert len(service_info.instances) == 2
+        active_inst = next(i for i in service_info.instances if i.instance_id == "active_instance")
+        standby_inst = next(
+            i for i in service_info.instances if i.instance_id == "standby_instance"
+        )
+
+        assert active_inst.role == "ACTIVE"
+        assert standby_inst.role == "STANDBY"

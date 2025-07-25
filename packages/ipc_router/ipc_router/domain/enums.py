@@ -11,3 +11,10 @@ class ServiceStatus(Enum):
     ONLINE = "ONLINE"
     OFFLINE = "OFFLINE"
     UNHEALTHY = "UNHEALTHY"
+
+
+class ServiceRole(Enum):
+    """Service instance role enumeration for active/standby configuration."""
+
+    ACTIVE = "ACTIVE"
+    STANDBY = "STANDBY"

@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from .enums import ServiceStatus
+from .enums import ServiceRole, ServiceStatus
 
 
 class ServiceEventType(Enum):
@@ -18,6 +18,7 @@ class ServiceEventType(Enum):
     INSTANCE_UNREGISTERED = "instance_unregistered"
     INSTANCE_STATUS_CHANGED = "instance_status_changed"
     INSTANCE_HEARTBEAT_UPDATED = "instance_heartbeat_updated"
+    INSTANCE_ROLE_CHANGED = "instance_role_changed"
     CUSTOM = "custom"
 
 
@@ -57,6 +58,46 @@ class InstanceStatusChangedEvent(ServiceEvent):
         )
         self.old_status = old_status
         self.new_status = new_status
+
+
+class RoleChangedEvent(ServiceEvent):
+    """Event fired when instance role changes."""
+
+    old_role: ServiceRole | None
+    new_role: ServiceRole | None
+    resource_id: str | None = None
+
+    def __init__(
+        self,
+        service_name: str,
+        instance_id: str,
+        timestamp: datetime,
+        old_role: ServiceRole | None,
+        new_role: ServiceRole | None,
+        resource_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize role changed event.
+
+        Args:
+            service_name: Name of the service
+            instance_id: Instance ID
+            timestamp: Event timestamp
+            old_role: Previous role (None for new registrations)
+            new_role: New role (None for unregistrations)
+            resource_id: Optional resource ID for resource-specific role changes
+            metadata: Additional event metadata
+        """
+        super().__init__(
+            event_type=ServiceEventType.INSTANCE_ROLE_CHANGED,
+            service_name=service_name,
+            instance_id=instance_id,
+            timestamp=timestamp,
+            metadata=metadata,
+        )
+        self.old_role = old_role
+        self.new_role = new_role
+        self.resource_id = resource_id
 
 
 ServiceEventHandler = Callable[[ServiceEvent], Awaitable[None]]

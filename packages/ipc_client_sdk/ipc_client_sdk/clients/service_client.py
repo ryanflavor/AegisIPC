@@ -299,6 +299,7 @@ class ServiceClient:
         self,
         service_name: str,
         instance_id: str | None = None,
+        role: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ServiceRegistrationResponse:
         """Register a service instance.
@@ -306,6 +307,7 @@ class ServiceClient:
         Args:
             service_name: Name of the service
             instance_id: Instance ID, uses default if not provided
+            role: Service role ("active" or "standby"), defaults to "standby"
             metadata: Optional metadata for the instance
 
         Returns:
@@ -314,6 +316,7 @@ class ServiceClient:
         Raises:
             RuntimeError: If not connected to NATS
             TimeoutError: If request times out
+            ServiceRegistrationError: If registration fails
         """
         if not self.is_connected:
             raise RuntimeError("Not connected to NATS")
@@ -325,6 +328,7 @@ class ServiceClient:
         request_data = {
             "service_name": service_name,
             "instance_id": effective_instance_id,
+            "role": role or "standby",  # Default to standby if not specified
             "metadata": metadata or {},
         }
 
@@ -336,11 +340,28 @@ class ServiceClient:
         if response is None:
             raise TimeoutError("Registration request timed out")
 
-        # Check for error in envelope
-        envelope = response.get("envelope", {})
-        if not envelope.get("success", True):
-            error_msg = envelope.get("message", "Registration failed")
-            raise Exception(error_msg)
+        # Check for error in response
+        if not response.get("success", True):
+            # Check if it's a structured error response
+            error_info = response.get("error", {})
+            if error_info:
+                error_code = error_info.get("code", "UNKNOWN")
+                error_msg = error_info.get("message", "Registration failed")
+                error_details = error_info.get("details", {})
+
+                # Handle specific error codes
+                if error_code == "ROLE_CONFLICT" or error_code == "DUPLICATE_INSTANCE":
+                    raise ServiceRegistrationError(
+                        error_msg, error_code=error_code, details=error_details
+                    )
+                else:
+                    raise ServiceRegistrationError(
+                        error_msg, error_code=error_code, details=error_details
+                    )
+            else:
+                # Legacy error format
+                error_msg = response.get("message", "Registration failed")
+                raise ServiceRegistrationError(error_msg)
 
         # Parse response data
         data = response.get("data", {})
@@ -372,6 +393,7 @@ class ServiceClient:
             success=data.get("success", True),
             service_name=data.get("service_name", service_name),
             instance_id=data.get("instance_id", effective_instance_id),
+            role=data.get("role", "STANDBY"),  # Default to STANDBY if not provided
             registered_at=registered_at,
             message=data.get("message", ""),
         )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -14,11 +14,15 @@ class ServiceRegistrationRequest(BaseModel):
     Attributes:
         service_name: Name of the service to register
         instance_id: Unique identifier for this service instance
+        role: Service role (active or standby)
         metadata: Optional metadata associated with the instance
     """
 
     service_name: str = Field(..., description="Name of the service to register")
     instance_id: str = Field(..., description="Unique identifier for this service instance")
+    role: Literal["active", "standby"] | None = Field(
+        "standby", description="Service role (active or standby)"
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
     @field_validator("service_name", "instance_id")
@@ -42,6 +46,7 @@ class ServiceRegistrationRequest(BaseModel):
             "example": {
                 "service_name": "user-service",
                 "instance_id": "usr_srv_01_abc123",
+                "role": "active",
                 "metadata": {"version": "1.0.0", "region": "us-east-1"},
             }
         }
@@ -55,6 +60,7 @@ class ServiceRegistrationResponse(BaseModel):
         success: Whether the registration was successful
         service_name: Name of the registered service
         instance_id: ID of the registered instance
+        role: Assigned role (ACTIVE or STANDBY)
         registered_at: Timestamp when the instance was registered
         message: Optional message about the registration
     """
@@ -62,6 +68,7 @@ class ServiceRegistrationResponse(BaseModel):
     success: bool = Field(..., description="Whether the registration was successful")
     service_name: str = Field(..., description="Name of the registered service")
     instance_id: str = Field(..., description="ID of the registered instance")
+    role: str = Field(..., description="Assigned role (ACTIVE or STANDBY)")
     registered_at: datetime = Field(..., description="Registration timestamp")
     message: str | None = Field(None, description="Optional message about the registration")
 
@@ -71,6 +78,7 @@ class ServiceRegistrationResponse(BaseModel):
                 "success": True,
                 "service_name": "user-service",
                 "instance_id": "usr_srv_01_abc123",
+                "role": "ACTIVE",
                 "registered_at": "2025-01-21T10:00:00Z",
                 "message": "Service instance registered successfully",
             }
@@ -84,6 +92,7 @@ class ServiceInstanceInfo(BaseModel):
     Attributes:
         instance_id: Unique identifier for this service instance
         status: Current status of the instance
+        role: Service role (ACTIVE or STANDBY)
         registered_at: Timestamp when the instance was registered
         last_heartbeat: Timestamp of the last heartbeat
         metadata: Optional metadata associated with the instance
@@ -91,6 +100,7 @@ class ServiceInstanceInfo(BaseModel):
 
     instance_id: str = Field(..., description="Unique instance identifier")
     status: str = Field(..., description="Current status (ONLINE, OFFLINE, UNHEALTHY)")
+    role: str | None = Field(None, description="Service role (ACTIVE or STANDBY)")
     registered_at: datetime = Field(..., description="Registration timestamp")
     last_heartbeat: datetime = Field(..., description="Last heartbeat timestamp")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
@@ -143,6 +153,7 @@ class ServiceListResponse(BaseModel):
                             {
                                 "instance_id": "usr_srv_01",
                                 "status": "ONLINE",
+                                "role": "ACTIVE",
                                 "registered_at": "2025-01-21T10:00:00Z",
                                 "last_heartbeat": "2025-01-21T10:05:00Z",
                                 "metadata": {},

@@ -5,12 +5,32 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 from ipc_client_sdk.models import ServiceInfo, ServiceListResponse
+from pydantic import BaseModel, Field
 
 from ipc_router.application.services import ServiceRegistry
 from ipc_router.domain.exceptions import NotFoundError
 from ipc_router.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+class ServiceRoleInfo(BaseModel):
+    """Information about service instances by role."""
+
+    service_name: str = Field(..., description="Name of the service")
+    active_instances: list[str] = Field(
+        default_factory=list, description="List of active instance IDs"
+    )
+    standby_instances: list[str] = Field(
+        default_factory=list, description="List of standby instance IDs"
+    )
+
+
+class ServiceRolesResponse(BaseModel):
+    """Response containing role information for a service."""
+
+    service_name: str = Field(..., description="Name of the service")
+    roles: ServiceRoleInfo = Field(..., description="Role information")
 
 
 def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
@@ -31,7 +51,7 @@ def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
         },
     )
 
-    @router.get(
+    @router.get(  # type: ignore[misc]
         "/services",
         response_model=ServiceListResponse,
         summary="List all registered services",
@@ -67,7 +87,7 @@ def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
                 detail="Failed to retrieve services",
             ) from e
 
-    @router.get(
+    @router.get(  # type: ignore[misc]
         "/services/{service_name}",
         response_model=ServiceInfo,
         summary="Get service details",
@@ -129,7 +149,7 @@ def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
                 detail="Failed to retrieve service information",
             ) from e
 
-    @router.get(
+    @router.get(  # type: ignore[misc]
         "/health",
         summary="Check system health",
         description="Get health status of all registered services",
@@ -168,6 +188,99 @@ def create_services_router(service_registry: ServiceRegistry) -> APIRouter:
                     "error": str(e),
                 },
             )
+
+    @router.get(  # type: ignore[misc]
+        "/services/{service_name}/roles",
+        response_model=ServiceRolesResponse,
+        summary="Get service role information",
+        description="Retrieve active/standby role information for a specific service",
+        responses={
+            200: {
+                "description": "Service role details",
+                "model": ServiceRolesResponse,
+            },
+        },
+    )
+    async def get_service_roles(service_name: str) -> ServiceRolesResponse:
+        """Get role information for a specific service.
+
+        Args:
+            service_name: Name of the service to retrieve role info for
+
+        Returns:
+            ServiceRolesResponse containing active/standby instance information
+
+        Raises:
+            HTTPException: 404 if service not found
+        """
+        try:
+            from ipc_router.domain.enums import ServiceRole
+
+            logger.info(
+                "Getting service role information",
+                extra={"service_name": service_name},
+            )
+
+            # Verify service exists first
+            await service_registry.get_service(service_name)
+
+            # Get instances by role using optimized method
+            active_instances_data = await service_registry.get_instances_by_role(
+                service_name, ServiceRole.ACTIVE
+            )
+            standby_instances_data = await service_registry.get_instances_by_role(
+                service_name, ServiceRole.STANDBY
+            )
+
+            # Extract instance IDs
+            active_instances = [inst.instance_id for inst in active_instances_data]
+            standby_instances = [inst.instance_id for inst in standby_instances_data]
+
+            # Also include instances with None role as standby (backward compatibility)
+            service_info = await service_registry.get_service(service_name)
+            for instance in service_info.instances:
+                if instance.role is None and instance.instance_id not in standby_instances:
+                    standby_instances.append(instance.instance_id)
+
+            role_info = ServiceRoleInfo(
+                service_name=service_name,
+                active_instances=active_instances,
+                standby_instances=standby_instances,
+            )
+
+            logger.debug(
+                "Retrieved service role information",
+                extra={
+                    "service_name": service_name,
+                    "active_count": len(active_instances),
+                    "standby_count": len(standby_instances),
+                },
+            )
+
+            return ServiceRolesResponse(
+                service_name=service_name,
+                roles=role_info,
+            )
+
+        except NotFoundError:
+            logger.warning(
+                "Service not found",
+                extra={"service_name": service_name},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Service '{service_name}' not found",
+            ) from None
+        except Exception as e:
+            logger.error(
+                "Failed to get service role information",
+                exc_info=e,
+                extra={"service_name": service_name},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve service role information",
+            ) from e
 
     return router
 

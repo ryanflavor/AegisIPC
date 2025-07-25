@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from ipc_router.domain.enums import ServiceStatus
+from ipc_router.domain.enums import ServiceRole, ServiceStatus
 from ipc_router.domain.events import (
     InstanceStatusChangedEvent,
+    RoleChangedEvent,
     ServiceEvent,
     ServiceEventType,
 )
@@ -21,6 +22,7 @@ class TestServiceEventType:
         assert ServiceEventType.INSTANCE_UNREGISTERED.value == "instance_unregistered"
         assert ServiceEventType.INSTANCE_STATUS_CHANGED.value == "instance_status_changed"
         assert ServiceEventType.INSTANCE_HEARTBEAT_UPDATED.value == "instance_heartbeat_updated"
+        assert ServiceEventType.INSTANCE_ROLE_CHANGED.value == "instance_role_changed"
         assert ServiceEventType.CUSTOM.value == "custom"
 
 
@@ -118,4 +120,99 @@ class TestInstanceStatusChangedEvent:
 
         # Should be instance of both classes
         assert isinstance(event, InstanceStatusChangedEvent)
+        assert isinstance(event, ServiceEvent)
+
+
+class TestRoleChangedEvent:
+    """Test RoleChangedEvent class."""
+
+    def test_role_changed_event_creation(self) -> None:
+        """Test creating a role changed event."""
+        timestamp = datetime.now(UTC)
+        event = RoleChangedEvent(
+            service_name="api-service",
+            instance_id="api-001",
+            timestamp=timestamp,
+            old_role=ServiceRole.STANDBY,
+            new_role=ServiceRole.ACTIVE,
+            resource_id="res_123",
+            metadata={"promoted_by": "health_checker"},
+        )
+
+        # Check base class attributes
+        assert event.event_type == ServiceEventType.INSTANCE_ROLE_CHANGED
+        assert event.service_name == "api-service"
+        assert event.instance_id == "api-001"
+        assert event.timestamp == timestamp
+        assert event.metadata == {"promoted_by": "health_checker"}
+
+        # Check specific attributes
+        assert event.old_role == ServiceRole.STANDBY
+        assert event.new_role == ServiceRole.ACTIVE
+        assert event.resource_id == "res_123"
+
+    def test_role_changed_event_new_registration(self) -> None:
+        """Test role changed event for new registration (no old role)."""
+        timestamp = datetime.now(UTC)
+        event = RoleChangedEvent(
+            service_name="worker-service",
+            instance_id="worker-001",
+            timestamp=timestamp,
+            old_role=None,
+            new_role=ServiceRole.ACTIVE,
+            resource_id="task_queue",
+        )
+
+        assert event.event_type == ServiceEventType.INSTANCE_ROLE_CHANGED
+        assert event.old_role is None
+        assert event.new_role == ServiceRole.ACTIVE
+        assert event.resource_id == "task_queue"
+        assert event.metadata is None
+
+    def test_role_changed_event_unregistration(self) -> None:
+        """Test role changed event for unregistration (no new role)."""
+        timestamp = datetime.now(UTC)
+        event = RoleChangedEvent(
+            service_name="db-service",
+            instance_id="db-primary",
+            timestamp=timestamp,
+            old_role=ServiceRole.ACTIVE,
+            new_role=None,
+            metadata={"reason": "graceful_shutdown"},
+        )
+
+        assert event.event_type == ServiceEventType.INSTANCE_ROLE_CHANGED
+        assert event.old_role == ServiceRole.ACTIVE
+        assert event.new_role is None
+        assert event.resource_id is None
+
+    def test_role_changed_event_without_resource(self) -> None:
+        """Test role changed event without resource ID."""
+        timestamp = datetime.now(UTC)
+        event = RoleChangedEvent(
+            service_name="cache-service",
+            instance_id="cache-002",
+            timestamp=timestamp,
+            old_role=ServiceRole.STANDBY,
+            new_role=ServiceRole.ACTIVE,
+        )
+
+        assert event.service_name == "cache-service"
+        assert event.instance_id == "cache-002"
+        assert event.old_role == ServiceRole.STANDBY
+        assert event.new_role == ServiceRole.ACTIVE
+        assert event.resource_id is None
+
+    def test_role_changed_event_inheritance(self) -> None:
+        """Test that RoleChangedEvent inherits from ServiceEvent."""
+        event = RoleChangedEvent(
+            service_name="test",
+            instance_id="test-1",
+            timestamp=datetime.now(UTC),
+            old_role=ServiceRole.ACTIVE,
+            new_role=ServiceRole.STANDBY,
+        )
+
+        # Should be instance of both classes
+        assert isinstance(event, RoleChangedEvent)
         assert isinstance(event, ServiceEvent)

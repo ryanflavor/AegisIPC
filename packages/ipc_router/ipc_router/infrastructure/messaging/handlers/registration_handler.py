@@ -8,7 +8,7 @@ from ipc_client_sdk.models import ServiceRegistrationRequest
 
 from ipc_router.application.error_handling import RetryConfig
 from ipc_router.application.services import ServiceRegistry
-from ipc_router.domain.exceptions import AegisIPCError, DuplicateServiceInstanceError
+from ipc_router.domain.exceptions import AegisIPCError, ConflictError, DuplicateServiceInstanceError
 from ipc_router.infrastructure.logging import get_logger
 from ipc_router.infrastructure.messaging.nats_client import NATSClient
 
@@ -71,11 +71,16 @@ class RegistrationHandler:
             # Parse request
             request = ServiceRegistrationRequest(**data)
 
+            # Default to STANDBY role if not specified for backward compatibility
+            if not hasattr(request, "role") or request.role is None:
+                request.role = "standby"
+
             logger.info(
                 "Processing registration request",
                 extra={
                     "service_name": request.service_name,
                     "instance_id": request.instance_id,
+                    "role": request.role,
                 },
             )
 
@@ -90,9 +95,28 @@ class RegistrationHandler:
                     "success": response.success,
                     "service_name": response.service_name,
                     "instance_id": response.instance_id,
+                    "role": response.role,
                     "registered_at": response.registered_at.isoformat(),
                     "message": response.message,
                 },
+            )
+
+        except ConflictError as e:
+            # Handle role conflicts
+            logger.warning(
+                "Role conflict during registration",
+                extra={
+                    "error": str(e),
+                    "details": e.details,
+                },
+            )
+
+            # Send error response
+            await self._send_error_response(
+                reply_subject=reply_subject,
+                error_code="ROLE_CONFLICT",
+                message=str(e),
+                details=e.details,
             )
 
         except DuplicateServiceInstanceError as e:

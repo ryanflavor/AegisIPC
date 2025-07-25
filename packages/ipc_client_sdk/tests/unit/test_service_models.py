@@ -124,6 +124,7 @@ class TestServiceRegistrationRequest:
         assert json_data == {
             "service_name": "user-service",
             "instance_id": "usr_srv_01_abc123",
+            "role": "standby",  # Default role
             "metadata": {"version": "1.0.0"},
         }
 
@@ -139,6 +140,45 @@ class TestServiceRegistrationRequest:
         assert request.service_name == "user-service"
         assert request.instance_id == "usr_srv_01_abc123"
         assert request.metadata == {"version": "1.0.0"}
+        assert request.role == "standby"  # Default role
+
+    def test_registration_request_with_role(self) -> None:
+        """Test creating registration request with role."""
+        # Test with active role
+        active_request = ServiceRegistrationRequest(
+            service_name="user-service",
+            instance_id="usr_srv_01_abc123",
+            role="active",
+        )
+        assert active_request.role == "active"
+
+        # Test with standby role
+        standby_request = ServiceRegistrationRequest(
+            service_name="user-service",
+            instance_id="usr_srv_02_abc123",
+            role="standby",
+        )
+        assert standby_request.role == "standby"
+
+        # Test default role when not specified
+        default_request = ServiceRegistrationRequest(
+            service_name="user-service",
+            instance_id="usr_srv_03_abc123",
+        )
+        assert default_request.role == "standby"
+
+    def test_registration_request_invalid_role(self) -> None:
+        """Test that invalid role raises validation error."""
+        with pytest.raises(ValidationError) as exc_info:
+            ServiceRegistrationRequest(
+                service_name="user-service",
+                instance_id="usr_srv_01_abc123",
+                role="invalid",  # type: ignore
+            )
+
+        errors = exc_info.value.errors()
+        assert len(errors) == 1
+        assert errors[0]["loc"] == ("role",)
 
 
 class TestServiceRegistrationResponse:
@@ -151,6 +191,7 @@ class TestServiceRegistrationResponse:
             success=True,
             service_name="user-service",
             instance_id="usr_srv_01_abc123",
+            role="ACTIVE",
             registered_at=now,
             message="Service instance registered successfully",
         )
@@ -158,6 +199,7 @@ class TestServiceRegistrationResponse:
         assert response.success is True
         assert response.service_name == "user-service"
         assert response.instance_id == "usr_srv_01_abc123"
+        assert response.role == "ACTIVE"
         assert response.registered_at == now
         assert response.message == "Service instance registered successfully"
 
@@ -168,10 +210,12 @@ class TestServiceRegistrationResponse:
             success=True,
             service_name="test-service",
             instance_id="test_01",
+            role="STANDBY",
             registered_at=now,
         )
 
         assert response.success is True
+        assert response.role == "STANDBY"
         assert response.message is None
 
     def test_registration_response_failure(self) -> None:
@@ -181,11 +225,13 @@ class TestServiceRegistrationResponse:
             success=False,
             service_name="test-service",
             instance_id="test_01",
+            role="ACTIVE",
             registered_at=now,
             message="Service already registered",
         )
 
         assert response.success is False
+        assert response.role == "ACTIVE"
         assert response.message == "Service already registered"
 
     def test_registration_response_json_serialization(self) -> None:
@@ -240,6 +286,31 @@ class TestServiceInstanceInfo:
         assert info.instance_id == "instance_01"
         assert info.status == "OFFLINE"
         assert info.metadata == {}
+        assert info.role is None  # Default role
+
+    def test_service_instance_info_with_role(self) -> None:
+        """Test creating service instance info with role."""
+        now = datetime.now(UTC)
+
+        # Test with ACTIVE role
+        active_info = ServiceInstanceInfo(
+            instance_id="active_instance",
+            status="ONLINE",
+            role="ACTIVE",
+            registered_at=now,
+            last_heartbeat=now,
+        )
+        assert active_info.role == "ACTIVE"
+
+        # Test with STANDBY role
+        standby_info = ServiceInstanceInfo(
+            instance_id="standby_instance",
+            status="ONLINE",
+            role="STANDBY",
+            registered_at=now,
+            last_heartbeat=now,
+        )
+        assert standby_info.role == "STANDBY"
 
     def test_service_instance_info_all_statuses(self) -> None:
         """Test service instance info with all possible statuses."""

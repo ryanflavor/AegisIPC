@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from ipc_router.domain.enums import ServiceStatus
+from ipc_router.domain.enums import ServiceRole, ServiceStatus
 
 
 @dataclass
@@ -17,6 +17,7 @@ class ServiceInstance:
         instance_id: Unique identifier for this service instance
         service_name: Name of the service this instance belongs to
         status: Current status of the instance
+        role: Service role (ACTIVE or STANDBY)
         registered_at: Timestamp when the instance was registered
         last_heartbeat: Timestamp of the last heartbeat received
         metadata: Optional metadata associated with the instance
@@ -25,6 +26,7 @@ class ServiceInstance:
     instance_id: str
     service_name: str
     status: ServiceStatus
+    role: ServiceRole | None = None
     registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_heartbeat: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)

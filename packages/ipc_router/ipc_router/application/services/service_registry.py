@@ -15,9 +15,15 @@ from ipc_client_sdk.models import (
 )
 
 from ipc_router.domain.entities import Service, ServiceInstance
-from ipc_router.domain.enums import ServiceStatus
-from ipc_router.domain.events import InstanceStatusChangedEvent, ServiceEvent, ServiceEventType
+from ipc_router.domain.enums import ServiceRole, ServiceStatus
+from ipc_router.domain.events import (
+    InstanceStatusChangedEvent,
+    RoleChangedEvent,
+    ServiceEvent,
+    ServiceEventType,
+)
 from ipc_router.domain.exceptions import (
+    ConflictError,
     DuplicateServiceInstanceError,
     NotFoundError,
 )
@@ -38,6 +44,10 @@ class ServiceRegistry:
         self._services: dict[str, Service] = {}
         self._lock = asyncio.Lock()
         self._event_handlers: list[tuple[ServiceEventType | None, Any]] = []
+        # Track resource -> active instance mapping
+        self._resource_active_instances: dict[
+            str, tuple[str, str]
+        ] = {}  # resource_id -> (service_name, instance_id)
         logger.info("ServiceRegistry initialized")
 
     async def register_service(
@@ -88,24 +98,86 @@ class ServiceRegistry:
                     instance_id=instance_id,
                 )
 
+            # Determine role - default to STANDBY if not specified
+            role = ServiceRole.STANDBY
+            if hasattr(request, "role") and request.role:
+                role = ServiceRole(request.role.upper())
+
+            # Check for role conflicts if registering as ACTIVE
+            if role == ServiceRole.ACTIVE:
+                # Check if there's already an active instance for this resource
+                resource_id = self._get_resource_id_from_metadata(request.metadata)
+                if resource_id and resource_id in self._resource_active_instances:
+                    existing_service, existing_instance = self._resource_active_instances[
+                        resource_id
+                    ]
+                    logger.warning(
+                        "Active role conflict detected",
+                        extra={
+                            "service_name": service_name,
+                            "instance_id": instance_id,
+                            "resource_id": resource_id,
+                            "existing_service": existing_service,
+                            "existing_instance": existing_instance,
+                        },
+                    )
+                    raise ConflictError(
+                        f"Resource {resource_id} already has an active instance: "
+                        f"{existing_service}/{existing_instance}"
+                    )
+
             # Create and add new instance
             now = datetime.now(UTC)
             instance = ServiceInstance(
                 instance_id=instance_id,
                 service_name=service_name,
                 status=ServiceStatus.ONLINE,
+                role=role,
                 registered_at=now,
                 last_heartbeat=now,
                 metadata=request.metadata,
             )
 
+            # Track active instance for resource if applicable
+            if role == ServiceRole.ACTIVE:
+                resource_id = self._get_resource_id_from_metadata(request.metadata)
+                if resource_id:
+                    self._resource_active_instances[resource_id] = (service_name, instance_id)
+
             service.add_instance(instance)
+
+            # Emit role changed event for new registration
+            resource_id = self._get_resource_id_from_metadata(request.metadata)
+            event = RoleChangedEvent(
+                service_name=service_name,
+                instance_id=instance_id,
+                timestamp=now,
+                old_role=None,  # New registration
+                new_role=role,
+                resource_id=resource_id,
+                metadata={"event_type": "registration"},
+            )
+            await self._emit_event(event)
+
+            # Log role transition
+            logger.info(
+                "Role transition: new registration",
+                extra={
+                    "service_name": service_name,
+                    "instance_id": instance_id,
+                    "old_role": None,
+                    "new_role": role.value,
+                    "resource_id": resource_id,
+                    "event_type": "registration",
+                },
+            )
 
             logger.info(
                 "Service instance registered successfully",
                 extra={
                     "service_name": service_name,
                     "instance_id": instance_id,
+                    "role": role.value,
                     "instance_count": service.instance_count,
                     "metadata": request.metadata,
                 },
@@ -115,8 +187,9 @@ class ServiceRegistry:
                 success=True,
                 service_name=service_name,
                 instance_id=instance_id,
+                role=role.value,
                 registered_at=now,
-                message="Service instance registered successfully",
+                message=f"Service instance registered successfully as {role.value}",
             )
 
     async def get_service(self, service_name: str) -> ServiceInfo:
@@ -143,6 +216,7 @@ class ServiceRegistry:
                 ServiceInstanceInfo(
                     instance_id=inst.instance_id,
                     status=inst.status,
+                    role=inst.role.value if inst.role else None,
                     registered_at=inst.registered_at,
                     last_heartbeat=inst.last_heartbeat,
                     metadata=inst.metadata,
@@ -171,6 +245,7 @@ class ServiceRegistry:
                     ServiceInstanceInfo(
                         instance_id=inst.instance_id,
                         status=inst.status,
+                        role=inst.role.value if inst.role else None,
                         registered_at=inst.registered_at,
                         last_heartbeat=inst.last_heartbeat,
                         metadata=inst.metadata,
@@ -262,6 +337,49 @@ class ServiceRegistry:
                     resource_type="ServiceInstance",
                     resource_id=f"{service_name}/{instance_id}",
                 )
+
+            # Emit role changed event for unregistration
+            if removed_instance.role:
+                resource_id = self._get_resource_id_from_metadata(removed_instance.metadata)
+                event = RoleChangedEvent(
+                    service_name=service_name,
+                    instance_id=instance_id,
+                    timestamp=datetime.now(UTC),
+                    old_role=removed_instance.role,
+                    new_role=None,  # Unregistration
+                    resource_id=resource_id,
+                    metadata={"event_type": "unregistration"},
+                )
+                await self._emit_event(event)
+
+                # Log role transition
+                logger.info(
+                    "Role transition: unregistration",
+                    extra={
+                        "service_name": service_name,
+                        "instance_id": instance_id,
+                        "old_role": removed_instance.role.value,
+                        "new_role": None,
+                        "resource_id": resource_id,
+                        "event_type": "unregistration",
+                    },
+                )
+
+            # Clean up active instance tracking if needed
+            if removed_instance.role == ServiceRole.ACTIVE:
+                resource_id = self._get_resource_id_from_metadata(removed_instance.metadata)
+                if resource_id and resource_id in self._resource_active_instances:
+                    stored_service, stored_instance = self._resource_active_instances[resource_id]
+                    if stored_service == service_name and stored_instance == instance_id:
+                        del self._resource_active_instances[resource_id]
+                        logger.info(
+                            "Removed active instance tracking for resource",
+                            extra={
+                                "service_name": service_name,
+                                "instance_id": instance_id,
+                                "resource_id": resource_id,
+                            },
+                        )
 
             # Remove service if no more instances
             if service.instance_count == 0:
@@ -501,3 +619,52 @@ class ServiceRegistry:
         # Execute all handlers concurrently
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def get_active_instance_for_resource(self, resource_id: str) -> tuple[str, str] | None:
+        """Get the active instance for a specific resource.
+
+        Args:
+            resource_id: ID of the resource to check
+
+        Returns:
+            Tuple of (service_name, instance_id) if an active instance exists, None otherwise
+        """
+        async with self._lock:
+            return self._resource_active_instances.get(resource_id)
+
+    async def get_instances_by_role(
+        self, service_name: str, role: ServiceRole
+    ) -> list[ServiceInstance]:
+        """Get all instances of a service with a specific role.
+
+        Args:
+            service_name: Name of the service
+            role: Role to filter by
+
+        Returns:
+            List of ServiceInstance objects with the specified role
+
+        Raises:
+            NotFoundError: If service does not exist
+        """
+        async with self._lock:
+            if service_name not in self._services:
+                raise NotFoundError(
+                    resource_type="Service",
+                    resource_id=service_name,
+                )
+
+            service = self._services[service_name]
+            return [instance for instance in service.instances.values() if instance.role == role]
+
+    @staticmethod
+    def _get_resource_id_from_metadata(metadata: dict[str, Any] | None) -> str | None:
+        """Extract resource_id from metadata dictionary.
+
+        Args:
+            metadata: Metadata dictionary that may contain resource_id
+
+        Returns:
+            The resource_id if present, None otherwise
+        """
+        return metadata.get("resource_id") if metadata else None

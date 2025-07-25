@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from ipc_router.domain.entities.service import Service, ServiceInstance
-from ipc_router.domain.enums import ServiceStatus
+from ipc_router.domain.enums import ServiceRole, ServiceStatus
 
 
 class TestServiceInstance:
@@ -27,6 +27,7 @@ class TestServiceInstance:
         assert instance.metadata == {"version": "1.0.0", "region": "us-east-1"}
         assert isinstance(instance.registered_at, datetime)
         assert isinstance(instance.last_heartbeat, datetime)
+        assert instance.role is None  # Default role should be None
 
     def test_service_instance_defaults(self) -> None:
         """Test ServiceInstance with default values."""
@@ -39,6 +40,27 @@ class TestServiceInstance:
         assert instance.metadata == {}
         assert instance.registered_at <= datetime.now(UTC)
         assert instance.last_heartbeat <= datetime.now(UTC)
+        assert instance.role is None  # Default role should be None
+
+    def test_service_instance_with_role(self) -> None:
+        """Test creating a ServiceInstance with role."""
+        # Test with ACTIVE role
+        active_instance = ServiceInstance(
+            instance_id="active_instance",
+            service_name="test-service",
+            status=ServiceStatus.ONLINE.value,
+            role=ServiceRole.ACTIVE,
+        )
+        assert active_instance.role == ServiceRole.ACTIVE
+
+        # Test with STANDBY role
+        standby_instance = ServiceInstance(
+            instance_id="standby_instance",
+            service_name="test-service",
+            status=ServiceStatus.ONLINE.value,
+            role=ServiceRole.STANDBY,
+        )
+        assert standby_instance.role == ServiceRole.STANDBY
 
     def test_update_heartbeat(self) -> None:
         """Test updating heartbeat timestamp."""

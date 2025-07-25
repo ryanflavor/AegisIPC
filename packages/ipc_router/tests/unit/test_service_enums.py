@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from ipc_router.domain.enums import ServiceStatus
+from ipc_router.domain.enums import ServiceRole, ServiceStatus
 
 
 class TestServiceStatus:
@@ -50,3 +50,44 @@ class TestServiceStatus:
         """Test string representation of enum."""
         assert str(ServiceStatus.ONLINE) == "ServiceStatus.ONLINE"
         assert repr(ServiceStatus.ONLINE) == "<ServiceStatus.ONLINE: 'ONLINE'>"
+
+
+class TestServiceRole:
+    """Tests for ServiceRole enum."""
+
+    def test_service_role_values(self) -> None:
+        """Test that all expected role values exist."""
+        assert ServiceRole.ACTIVE.value == "ACTIVE"
+        assert ServiceRole.STANDBY.value == "STANDBY"
+
+    def test_service_role_members(self) -> None:
+        """Test that all enum members are accessible."""
+        assert ServiceRole.ACTIVE in ServiceRole
+        assert ServiceRole.STANDBY in ServiceRole
+
+    def test_service_role_from_value(self) -> None:
+        """Test creating enum from string value."""
+        assert ServiceRole("ACTIVE") == ServiceRole.ACTIVE
+        assert ServiceRole("STANDBY") == ServiceRole.STANDBY
+
+    def test_service_role_invalid_value(self) -> None:
+        """Test that invalid values raise ValueError."""
+        with pytest.raises(ValueError, match="'INVALID' is not a valid ServiceRole"):
+            ServiceRole("INVALID")
+
+    def test_service_role_iteration(self) -> None:
+        """Test iterating over enum values."""
+        roles = list(ServiceRole)
+        assert len(roles) == 2
+        assert ServiceRole.ACTIVE in roles
+        assert ServiceRole.STANDBY in roles
+
+    def test_service_role_comparison(self) -> None:
+        """Test enum comparison."""
+        assert ServiceRole.ACTIVE == ServiceRole.ACTIVE
+        assert ServiceRole.ACTIVE != ServiceRole.STANDBY
+
+    def test_service_role_string_representation(self) -> None:
+        """Test string representation of enum."""
+        assert str(ServiceRole.ACTIVE) == "ServiceRole.ACTIVE"
+        assert repr(ServiceRole.ACTIVE) == "<ServiceRole.ACTIVE: 'ACTIVE'>"
